@@ -2,10 +2,11 @@ import asyncio
 from typing import Dict, List
 
 import aiohttp
-from apis.coingecko import CoinGeckoClient
-from apis.yahoo import YahooClient
-from constants import MAJOR_FOREX, MINOR_FOREX, SHORTCUTS
-from db.cache import TickerCache
+
+from .apis.coingecko import CoinGeckoClient
+from .apis.yahoo import YahooClient
+from .constants import MAJOR_FOREX, MINOR_FOREX, SHORTCUTS
+from .db.cache import TickerCache
 
 
 class MarketClassifier:
@@ -221,33 +222,3 @@ class MarketClassifier:
             results_map.update(processed)
 
         return [results_map.get(s.upper().strip()) for s in symbols]
-
-
-if __name__ == "__main__":
-    classifier = MarketClassifier()
-
-    test_symbols = [
-        "AAPL",
-        "BTC",
-        "ETH",
-        "EUR",
-        "JPY",
-        "GOLD",
-        "SILVER",
-        "OIL",
-        "SPX",
-        "UNKNOWN123",
-    ]
-
-    # Synchronous Test
-    sync_results = classifier.classify_bulk(test_symbols)
-    for res in sync_results:
-        print(res)
-
-    # Asynchronous Test
-    async def run_async_test():
-        async_results = await classifier.classify_bulk_async(test_symbols)
-        for res in async_results:
-            print(res)
-
-    asyncio.run(run_async_test())

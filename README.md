@@ -12,12 +12,8 @@
 
 ## Introduction
 
-`ticker-classifier` is a small Python library for classifying ticker-like symbols (for
-example `AAPL`, `BTC`, `EUR`, `GOLD`) into a simple market/category representation.
-It uses Yahoo Finance for equities, CoinGecko for cryptocurrencies and a few
-heuristics for currencies/commodities. The output indicates the most likely
-category, a display name, market cap when available, and a `yahoo_lookup` value
-to fetch further data if desired.
+`ticker-classifier` is a small Python library for classifying ticker-like symbols (for example `AAPL`, `BTC`, `EUR`, `GOLD`) into a simple market/category representation.
+It uses Yahoo Finance for equities, CoinGecko for cryptocurrencies and a few heuristics for currencies/commodities. The output indicates the most likely category, a display name, market cap when available, and a `yahoo_lookup` value to fetch further data if desired.
 
 ## Table of Contents 🗂
 
@@ -39,8 +35,7 @@ to fetch further data if desired.
 
 ## Installation ⚙️
 
-Install from pip using the provided `requirements.txt` or install the package
-directly from the repository for latest changes:
+Install from pip using the provided `requirements.txt` or install the package directly from the repository for latest changes:
 
 ```bash
 pip install -r requirements.txt
@@ -96,12 +91,9 @@ SQLite database (default `ticker_cache.db`) for `24` hours by default.
 - `classify_bulk_async(symbols: List[str]) -> List[dict]` – async bulk
     classification.
 
-- `ticker_classifier.apis.yahoo.YahooClient` – low-level Yahoo quote fetcher
-(sync + async helpers).
-- `ticker_classifier.apis.coingecko.CoinGeckoClient` – crypto lookup + market cap
-helpers (sync + async).
-- `ticker_classifier.db.cache.TickerCache` – tiny SQLite-backed cache used by
-`MarketClassifier`.
+- `ticker_classifier.apis.yahoo.YahooClient` – low-level Yahoo quote fetcher (sync + async helpers).
+- `ticker_classifier.apis.coingecko.CoinGeckoClient` – crypto lookup + market cap helpers (sync + async).
+- `ticker_classifier.db.cache.TickerCache` – tiny SQLite-backed cache used by `MarketClassifier`.
 
 ## Development
 

@@ -1,12 +1,6 @@
-shortcuts = {
-    "GOLD": {"type": "Commodity", "tik": "GC=F"},
-    "SILVER": {"type": "Commodity", "tik": "SI=F"},
-    "OIL": {"type": "Commodity", "tik": "CL=F"},
-    "SPX": {"type": "Index", "tik": "^GSPC"},
-    "NDX": {"type": "Index", "tik": "^IXIC"},
-}
-major_forex = {"USD", "EUR", "JPY", "GBP", "AUD", "CAD", "CHF"}
-minor_forex = {
+MAJOR_FOREX = {"USD", "EUR", "JPY", "GBP", "AUD", "CAD", "CHF", "CNY", "HKD", "NZD"}
+
+MINOR_FOREX = {
     "AED",
     "AFN",
     "ALL",
@@ -150,4 +144,31 @@ minor_forex = {
     "YER",
     "ZAR",
     "ZMW",
+}
+
+SHORTCUTS = {
+    "GOLD": {
+        "category": "Commodity",
+        "ticker": "GOLD",
+        "name": "Gold",
+        "yahoo_lookup": "GC=F",
+    },
+    "SILVER": {
+        "category": "Commodity",
+        "ticker": "SILVER",
+        "name": "Silver",
+        "yahoo_lookup": "SI=F",
+    },
+    "OIL": {
+        "category": "Commodity",
+        "ticker": "OIL",
+        "name": "Crude Oil",
+        "yahoo_lookup": "CL=F",
+    },
+    "SPX": {
+        "category": "Index",
+        "ticker": "SPX",
+        "name": "S&P 500",
+        "yahoo_lookup": "^GSPC",
+    },
 }

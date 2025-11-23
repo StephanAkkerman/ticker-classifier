@@ -12,25 +12,35 @@
 
 ## Introduction
 
-Ticker-classifier is a Python project for classifying tickers based on various criteria. Given a ticker, the project can determine its category, market, and other relevant information.f
+`ticker-classifier` is a small Python library for classifying ticker-like symbols (for
+example `AAPL`, `BTC`, `EUR`, `GOLD`) into a simple market/category representation.
+It uses Yahoo Finance for equities, CoinGecko for cryptocurrencies and a few
+heuristics for currencies/commodities. The output indicates the most likely
+category, a display name, market cap when available, and a `yahoo_lookup` value
+to fetch further data if desired.
 
 ## Table of Contents 🗂
 
 - [Key Features](#key-features)
 - [Installation](#installation)
 - [Usage](#usage)
+- [API](#api)
+- [Development](#development)
 - [Citation](#citation)
 - [Contributing](#contributing)
 - [License](#license)
 
 ## Key Features 🔑
 
-This section is optional. If your project has a lot of features, consider adding a list of key features here.
+- Classify symbols as `Equity`, `Crypto`, `Forex`, `Commodity`, `Index` or `Unknown`.
+- Uses multiple public APIs and simple heuristics to make robust decisions.
+- Provides both synchronous and asynchronous APIs.
+- Lightweight disk cache to avoid repeated lookups (`TickerCache`).
 
 ## Installation ⚙️
-<!-- Adjust the link of the second command to your own repo -->
 
-The required packages to run this code can be found in the requirements.txt file. To run this file, execute the following code block after cloning the repository:
+Install from pip using the provided `requirements.txt` or install the package
+directly from the repository for latest changes:
 
 ```bash
 pip install -r requirements.txt
@@ -44,24 +54,92 @@ pip install git+https://github.com/StephanAkkerman/ticker-classifier.git
 
 ## Usage ⌨️
 
+Basic synchronous usage:
+
+```python
+from ticker_classifier.classifier import MarketClassifier
+
+classifier = MarketClassifier()
+symbols = ["AAPL", "BTC", "EUR", "GOLD", "UNKNOWN123"]
+results = classifier.classify_bulk(symbols)
+for r in results:
+    print(r)
+```
+
+Example asynchronous usage:
+
+```python
+import asyncio
+from ticker_classifier.classifier import MarketClassifier
+
+async def main():
+    classifier = MarketClassifier()
+    symbols = ["AAPL", "BTC", "ETH", "JPY"]
+    results = await classifier.classify_bulk_async(symbols)
+    for r in results:
+        print(r)
+
+asyncio.run(main())
+```
+
+Notes
+- The classifier caches positive classifications (non-`Unknown`) in an
+SQLite database (default `ticker_cache.db`) for `24` hours by default.
+- You can customize the cache filename and expiry by passing `db_name` and
+`hours_to_expire` to `MarketClassifier`.
+
+## API
+
+- `ticker_classifier.classifier.MarketClassifier`
+- `classify_bulk(symbols: List[str]) -> List[dict]` – synchronous bulk
+    classification.
+- `classify_bulk_async(symbols: List[str]) -> List[dict]` – async bulk
+    classification.
+
+- `ticker_classifier.apis.yahoo.YahooClient` – low-level Yahoo quote fetcher
+(sync + async helpers).
+- `ticker_classifier.apis.coingecko.CoinGeckoClient` – crypto lookup + market cap
+helpers (sync + async).
+- `ticker_classifier.db.cache.TickerCache` – tiny SQLite-backed cache used by
+`MarketClassifier`.
+
+## Development
+
+Run formatting and linting tools you prefer (project uses `black` code style).
+
+Run a quick smoke check by running the `classifier.py` module directly:
+
+```powershell
+& .venv\Scripts\python.exe ticker_classifier\classifier.py
+```
+
+If you add tests, run them with your chosen test runner (e.g. `pytest`).
+
 ## Citation ✍️
-<!-- Be sure to adjust everything here so it matches your name and repo -->
-If you use this project in your research, please cite as follows:
+If you use this project in your research, please cite as follows (adjust
+metadata accordingly):
 
 ```bibtex
-@misc{project_name,
-  author  = {Stephan Akkerman},
-  title   = {Project Name},
-  year    = {2024},
-  publisher = {GitHub},
-  journal = {GitHub repository},
-  howpublished = {\url{https://github.com/StephanAkkerman/ticker-classifier}}
+@misc{ticker-classifier,
+author  = {Stephan Akkerman},
+title   = {ticker-classifier},
+year    = {2025},
+publisher = {GitHub},
+howpublished = {\url{https://github.com/StephanAkkerman/ticker-classifier}}
 }
 ```
 
 ## Contributing 🛠
-<!-- Be sure to adjust the repo name here for both the URL and GitHub link -->
-Contributions are welcome! If you have a feature request, bug report, or proposal for code refactoring, please feel free to open an issue on GitHub. We appreciate your help in improving this project.\
+
+Contributions are welcome. Suggested workflow:
+
+1. Fork the repository and create a feature branch.
+2. Run tests and format your changes with `black`.
+3. Open a pull request with a clear description of the change.
+
+Please open issues for feature requests or bugs and include a small
+reproducible example when possible.
+
 ![https://github.com/StephanAkkerman/ticker-classifier/graphs/contributors](https://contributors-img.firebaseapp.com/image?repo=StephanAkkerman/ticker-classifier)
 
 ## License 📜

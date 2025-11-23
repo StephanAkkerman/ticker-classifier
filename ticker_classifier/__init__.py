@@ -1,3 +1,3 @@
-from .classifier import MarketClassifier
+from .classifier import TickerClassifier
 
-__all__ = ["MarketClassifier"]
+__all__ = ["TickerClassifier"]

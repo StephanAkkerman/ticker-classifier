@@ -9,9 +9,9 @@ from .constants import MAJOR_FOREX, MINOR_FOREX, SHORTCUTS
 from .db.cache import TickerCache
 
 
-class MarketClassifier:
+class TickerClassifier:
     def __init__(self, db_name: str = "ticker_cache.db", hours_to_expire: int = 24):
-        """Create a MarketClassifier instance.
+        """Create a TickerClassifier instance.
 
         Parameters
         ----------
@@ -24,7 +24,6 @@ class MarketClassifier:
         self.yahoo = YahooClient()
         self.cg = CoinGeckoClient()
 
-    # --- CORE LOGIC (Shared) ---
     def _process_duel(
         self, to_process: List[str], yahoo_data: Dict, crypto_data: Dict
     ) -> Dict:
@@ -136,10 +135,7 @@ class MarketClassifier:
             processed[sym] = final
         return processed
 
-    # --- PUBLIC METHODS ---
-
-    def classify_bulk(self, symbols: List[str]) -> List[Dict]:
-        """Synchronous Bulk Classification"""
+    def classify(self, symbols: List[str]) -> List[Dict]:
         """Synchronously classify a list of ticker-like symbols.
 
         Parameters
@@ -177,8 +173,7 @@ class MarketClassifier:
 
         return [results_map.get(s.upper().strip()) for s in symbols]
 
-    async def classify_bulk_async(self, symbols: List[str]) -> List[Dict]:
-        """Asynchronous Bulk Classification"""
+    async def classify_async(self, symbols: List[str]) -> List[Dict]:
         """Asynchronously classify a list of ticker-like symbols.
 
         Parameters

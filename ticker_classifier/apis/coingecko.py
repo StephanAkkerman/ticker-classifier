@@ -7,11 +7,35 @@ import requests
 
 class CoinGeckoClient:
     def __init__(self):
+        """Initialize CoinGecko client.
+
+        Sets up base endpoints used for retrieving the coin list and simple
+        price information and initializes an internal cache for symbol -> id
+        mappings.
+
+        Notes
+        -----
+        The client keeps an in-memory `_crypto_map` that maps uppercase
+        symbols to a list of CoinGecko ids. This map is populated lazily by
+        `_load_map_sync` or `_load_map_async` when price lookup is requested.
+        """
         self.list_url = "https://api.coingecko.com/api/v3/coins/list"
         self.price_url = "https://api.coingecko.com/api/v3/simple/price"
         self._crypto_map = None  # { 'BTC': ['bitcoin', 'bitcoin-token'], ... }
 
     def _load_map_sync(self):
+        """Load the CoinGecko symbol->id map synchronously.
+
+        This method fetches the full coin list from the CoinGecko API and
+        populates the in-memory `_crypto_map` mapping uppercase symbol strings
+        to lists of CoinGecko ids. If the map is already loaded this is a
+        no-op.
+
+        Errors
+        ------
+        Any exceptions raised while fetching/parsing are caught and the map
+        falls back to an empty dict.
+        """
         if self._crypto_map:
             return
         try:
@@ -24,6 +48,19 @@ class CoinGeckoClient:
             self._crypto_map = {}
 
     async def _load_map_async(self, session: aiohttp.ClientSession):
+        """Asynchronously load the CoinGecko symbol->id map.
+
+        Parameters
+        ----------
+        session : aiohttp.ClientSession
+            Active aiohttp session used for making the HTTP request.
+
+        Notes
+        -----
+        This is the async counterpart to `_load_map_sync`. If the internal map
+        is already populated this method returns immediately. Exceptions are
+        caught and the map will be set to an empty dict on failure.
+        """
         if self._crypto_map:
             return
         try:
@@ -35,7 +72,25 @@ class CoinGeckoClient:
         except Exception:
             self._crypto_map = {}
 
-    def _get_candidate_ids(self, symbols: List[str]) -> (List[str], Dict[str, str]):
+    def _get_candidate_ids(
+        self, symbols: List[str]
+    ) -> tuple[List[str], Dict[str, str]]:
+        """Return candidate CoinGecko ids for a list of symbols.
+
+        Parameters
+        ----------
+        symbols : list[str]
+            Uppercase ticker symbols to map to CoinGecko ids.
+
+        Returns
+        -------
+        ids : list[str]
+            Flat list of candidate CoinGecko ids (limited to first 10
+            collisions per symbol).
+        id_to_parent : dict
+            Mapping of coin id -> original symbol (parent) used to group
+            results later.
+        """
         ids = []
         id_to_parent = {}
         if not self._crypto_map:
@@ -50,6 +105,24 @@ class CoinGeckoClient:
         return ids, id_to_parent
 
     def get_prices_sync(self, symbols: List[str]) -> Dict[str, Dict]:
+        """Synchronous price lookup for a list of symbols using CoinGecko.
+
+        This method ensures the internal symbol->id map is loaded, finds
+        candidate CoinGecko ids for the requested symbols, and retrieves USD
+        prices and market caps in chunks. The highest market cap candidate is
+        selected per symbol in `_process_response`.
+
+        Parameters
+        ----------
+        symbols : list[str]
+            Uppercase ticker symbols to look up.
+
+        Returns
+        -------
+        dict[str, dict]
+            Mapping of symbol -> {"market_cap": ..., "name": ..., "id": ...}
+            for matches found. Returns an empty dict if nothing matched.
+        """
         self._load_map_sync()
         results = {}
         ids, id_map = self._get_candidate_ids(symbols)
@@ -78,6 +151,25 @@ class CoinGeckoClient:
     async def get_prices_async(
         self, session: aiohttp.ClientSession, symbols: List[str]
     ) -> Dict[str, Dict]:
+        """Asynchronously retrieve prices and market caps for symbols.
+
+        Parameters
+        ----------
+        session : aiohttp.ClientSession
+            Active aiohttp session used to make HTTP requests.
+        symbols : list[str]
+            Uppercase ticker symbols to query.
+
+        Returns
+        -------
+        dict[str, dict]
+            Mapping of symbol -> {"market_cap": ..., "name": ..., "id": ...}.
+
+        Notes
+        -----
+        Uses the async map loader `_load_map_async` and requests CoinGecko in
+        chunks. Failures for a chunk are swallowed and processing continues.
+        """
         await self._load_map_async(session)
         results = {}
         ids, id_map = self._get_candidate_ids(symbols)
@@ -101,6 +193,18 @@ class CoinGeckoClient:
         return results
 
     def _process_response(self, data, id_map, results):
+        """Process a CoinGecko price response and update results.
+
+        Parameters
+        ----------
+        data : dict
+            JSON-decoded response from the CoinGecko simple/price endpoint.
+        id_map : dict
+            Mapping of coin id -> parent symbol used to group results.
+        results : dict
+            Mutable mapping that will be updated in-place with the best
+            candidate per parent symbol (highest market cap wins).
+        """
         for cid, val in data.items():
             parent = id_map.get(cid)
             if parent:

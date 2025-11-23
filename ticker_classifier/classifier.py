@@ -10,6 +10,15 @@ from db.cache import TickerCache
 
 class MarketClassifier:
     def __init__(self, db_name: str = "ticker_cache.db", hours_to_expire: int = 24):
+        """Create a MarketClassifier instance.
+
+        Parameters
+        ----------
+        db_name : str, optional
+            SQLite filename for the `TickerCache`, by default "ticker_cache.db".
+        hours_to_expire : int, optional
+            Hours after which cached entries expire, by default 24.
+        """
         self.cache = TickerCache(db_name, hours_to_expire)
         self.yahoo = YahooClient()
         self.cg = CoinGeckoClient()
@@ -18,6 +27,30 @@ class MarketClassifier:
     def _process_duel(
         self, to_process: List[str], yahoo_data: Dict, crypto_data: Dict
     ) -> Dict:
+        """Resolve competing category signals for each symbol.
+
+        The classifier considers three possible sources for each symbol:
+        stock (Yahoo), crypto (CoinGecko), and forex (heuristics). Each source
+        receives a numeric score (market cap or heuristic weight) and the
+        highest-scoring source determines the final classification.
+
+        Parameters
+        ----------
+        to_process : list[str]
+            Uppercase symbols to evaluate.
+        yahoo_data : dict
+            Mapping of symbol -> Yahoo quote dict (as returned by `YahooClient`).
+        crypto_data : dict
+            Mapping of symbol -> CoinGecko-derived dict containing at least
+            a `market_cap` key.
+
+        Returns
+        -------
+        dict
+            Mapping of symbol -> final classification dict containing keys
+            such as `category`, `ticker`, `name`, `market_cap`, and
+            `yahoo_lookup`.
+        """
         processed = {}
         # Init structure
         duel = {
@@ -106,6 +139,20 @@ class MarketClassifier:
 
     def classify_bulk(self, symbols: List[str]) -> List[Dict]:
         """Synchronous Bulk Classification"""
+        """Synchronously classify a list of ticker-like symbols.
+
+        Parameters
+        ----------
+        symbols : list[str]
+            Iterable of symbols (may contain duplicates or mixed case). The
+            returned list preserves the order of the input list with each
+            element replaced by its classification dict or `None`.
+
+        Returns
+        -------
+        list[dict]
+            List of classification dictionaries aligned with the input order.
+        """
         unique = list({s.upper().strip() for s in symbols if s.strip()})
         results_map = {}
         to_process = []
@@ -131,6 +178,20 @@ class MarketClassifier:
 
     async def classify_bulk_async(self, symbols: List[str]) -> List[Dict]:
         """Asynchronous Bulk Classification"""
+        """Asynchronously classify a list of ticker-like symbols.
+
+        Parameters
+        ----------
+        symbols : list[str]
+            List of symbols to classify. Input order is preserved in the
+            returned list.
+
+        Returns
+        -------
+        list[dict]
+            Classification results aligned with the input list; entries may
+            be `None` for unknown symbols.
+        """
         unique = list({s.upper().strip() for s in symbols if s.strip()})
         results_map = {}
         to_process = []

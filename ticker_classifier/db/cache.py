@@ -6,11 +6,25 @@ from typing import Any, Dict, List
 
 class TickerCache:
     def __init__(self, db_name: str, hours_to_expire: int):
+        """Initialize the ticker cache.
+
+        Parameters
+        ----------
+        db_name : str
+            Path or name of the SQLite database file used for caching.
+        hours_to_expire : int
+            Number of hours after which cached entries are considered expired.
+        """
         self.db_name = db_name
         self.hours_to_expire = hours_to_expire
         self._init_db()
 
     def _init_db(self):
+        """Create the `tickers` table if it does not already exist.
+
+        The table stores `symbol` as the primary key, the JSON-serialized
+        `data` blob and an ISO-formatted `updated_at` timestamp.
+        """
         with sqlite3.connect(self.db_name) as conn:
             conn.execute(
                 """
@@ -23,6 +37,20 @@ class TickerCache:
             )
 
     def get_many(self, symbols: List[str]) -> Dict[str, Any]:
+        """Retrieve multiple cached ticker entries that are not expired.
+
+        Parameters
+        ----------
+        symbols : list[str]
+            List of symbol strings to fetch from cache. If empty, returns an
+            empty dict.
+
+        Returns
+        -------
+        dict[str, Any]
+            Mapping of symbol -> deserialized cache object. Each returned
+            object will have a `source` key set to `'cache'`.
+        """
         if not symbols:
             return {}
         cutoff = (datetime.now() - timedelta(hours=self.hours_to_expire)).isoformat()
@@ -39,6 +67,15 @@ class TickerCache:
         return results
 
     def save_many(self, items: Dict[str, Any]):
+        """Save multiple items to the cache.
+
+        Parameters
+        ----------
+        items : dict[str, Any]
+            Mapping of symbol -> item dict. Items with `category == 'Unknown'`
+            are not persisted. The optional `source` key is stripped before
+            saving.
+        """
         if not items:
             return
         with sqlite3.connect(self.db_name) as conn:

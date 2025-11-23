@@ -10,9 +10,28 @@ HEADERS = {
 
 class YahooClient:
     def __init__(self):
+        """Initialize Yahoo client.
+
+        Sets the base endpoint used for quote queries.
+        """
         self.base_url = "https://query2.finance.yahoo.com/v7/finance/quote"
 
     def get_quotes_sync(self, symbols: List[str]) -> Dict[str, Dict]:
+        """Synchronously query Yahoo Finance for multiple symbols.
+
+        Parameters
+        ----------
+        symbols : list[str]
+            List of symbol strings to query. Symbols will be joined with commas
+            to form the Yahoo API request.
+
+        Returns
+        -------
+        dict[str, dict]
+            Mapping of uppercase symbol -> quote dictionary as returned by
+            Yahoo's `quoteResponse` result. Returns an empty dict if none
+            found or on error.
+        """
         results = {}
         if not symbols:
             return results
@@ -37,6 +56,20 @@ class YahooClient:
     async def get_quotes_async(
         self, session: aiohttp.ClientSession, symbols: List[str]
     ) -> Dict[str, Dict]:
+        """Asynchronously query Yahoo Finance for multiple symbols.
+
+        Parameters
+        ----------
+        session : aiohttp.ClientSession
+            Active aiohttp session used for the request.
+        symbols : list[str]
+            List of symbols to query.
+
+        Returns
+        -------
+        dict[str, dict]
+            Mapping of uppercase symbol -> quote dict returned by Yahoo.
+        """
         results = {}
         if not symbols:
             return results

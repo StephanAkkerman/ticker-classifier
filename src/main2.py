@@ -1,33 +1,33 @@
 import json
 import sqlite3
+from collections import defaultdict  # <--- Added for easier list handling
 from datetime import datetime, timedelta
+from typing import Any, Dict, List
 
 import yfinance as yf
 from pycoingecko import CoinGeckoAPI
 
-# Assuming your constants are in a file named constants.py
-# If running this alone, replace these imports with the actual dict/set definitions
+# Import your constants
 from constants import major_forex, minor_forex, shortcuts
 
 
 class MarketClassifier:
     def __init__(self, db_name: str = "ticker_cache.db", hours_to_expire: int = 24):
         self.cg = CoinGeckoAPI()
-
-        # Database Setup
         self.db_name = db_name
         self.hours_to_expire = hours_to_expire
         self._init_db()
 
-        # HARDCODED COMMODITIES / SHORTCUTS
         self.shortcuts = shortcuts
         self.major_forex = major_forex
         self.minor_forex = minor_forex
 
+        # Changed: Maps Symbol -> LIST of IDs (to handle collisions)
+        self._crypto_map: Dict[str, List[str]] = None
+
     def _init_db(self):
         with sqlite3.connect(self.db_name) as conn:
             cursor = conn.cursor()
-            # We store 'updated_at' as an ISO formatted string
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS tickers (
@@ -39,171 +39,232 @@ class MarketClassifier:
             )
             conn.commit()
 
-    def _get_from_cache(self, symbol):
-        """
-        Retrieves ticker data ONLY if it is newer than the expiration limit.
-        """
-        # Calculate the "Cutoff" time. Any data older than this is "dead".
+    def _get_many_from_cache(self, symbols: List[str]) -> Dict[str, Any]:
+        """Returns a dict {symbol: data} for found, fresh items."""
         cutoff_time = datetime.now() - timedelta(hours=self.hours_to_expire)
         cutoff_str = cutoff_time.isoformat()
+        results = {}
+        if not symbols:
+            return results
 
         with sqlite3.connect(self.db_name) as conn:
             cursor = conn.cursor()
+            placeholders = ",".join("?" * len(symbols))
+            query = f"SELECT symbol, data FROM tickers WHERE symbol IN ({placeholders}) AND updated_at > ?"
+            cursor.execute(query, symbols + [cutoff_str])
+            for symbol, data_str in cursor.fetchall():
+                results[symbol] = json.loads(data_str)
+                results[symbol]["source"] = "cache"
+        return results
 
-            # SQL Query: Get data WHERE symbol matches AND date > cutoff
-            cursor.execute(
-                """
-                SELECT data FROM tickers 
-                WHERE symbol = ? AND updated_at > ?
-            """,
-                (symbol, cutoff_str),
-            )
-
-            row = cursor.fetchone()
-            if row:
-                return json.loads(row[0])  # Found fresh data
-
-        return None  # Found nothing, or data was too old (expired)
-
-    def _save_to_cache(self, symbol, data):
+    def _save_many_to_cache(self, items: Dict[str, Any]):
+        if not items:
+            return
         with sqlite3.connect(self.db_name) as conn:
             cursor = conn.cursor()
-            json_data = json.dumps(data)
             now = datetime.now().isoformat()
+            data_tuples = []
+            for sym, data in items.items():
+                if data.get("category") != "Unknown":
+                    clean_data = {k: v for k, v in data.items() if k != "source"}
+                    data_tuples.append((sym, json.dumps(clean_data), now))
+            if data_tuples:
+                cursor.executemany(
+                    "INSERT OR REPLACE INTO tickers (symbol, data, updated_at) VALUES (?, ?, ?)",
+                    data_tuples,
+                )
+                conn.commit()
 
-            # INSERT OR REPLACE updates the 'updated_at' timestamp automatically
-            cursor.execute(
-                """
-                INSERT OR REPLACE INTO tickers (symbol, data, updated_at)
-                VALUES (?, ?, ?)
-            """,
-                (symbol, json_data, now),
-            )
-            conn.commit()
+    # --- UPDATED CRYPTO MAPPING ---
+    def _get_crypto_map(self):
+        """
+        Maps Symbol -> LIST of IDs.
+        Example: 'BTC' -> ['bitcoin', 'batcat', 'bitcoin-2']
+        """
+        if self._crypto_map is not None:
+            return self._crypto_map
 
-    def classify(self, symbol):
-        symbol = symbol.upper().strip()
-
-        # 1. FASTEST: Check Hardcoded Shortcuts
-        # (We check this before DB because it's instant memory lookup)
-        if symbol in self.shortcuts:
-            return self.shortcuts[symbol]
-
-        # 2. FAST: Check Database Cache
-        cached_result = self._get_from_cache(symbol)
-        if cached_result:
-            # Optional: Add a flag so you know it came from cache
-            cached_result["source"] = "cache"
-            return cached_result
-
-        # --- START EXPENSIVE API LOGIC ---
-
-        scores = {"stock": 0, "crypto": 0, "forex": 0}
-        details = {}
-
-        # 3. Forex Check
-        if symbol in self.major_forex:
-            scores["forex"] = 100_000_000_000_000
-        elif symbol in self.minor_forex:
-            scores["forex"] = 50_000_000
-
-        # 4. Stock/ETF/Index Check
+        # print("Fetching CoinGecko Master List...")
         try:
-            ticker = yf.Ticker(symbol)
-            info = ticker.info
-            qtype = info.get("quoteType")
+            coins = self.cg.get_coins_list()
+            self._crypto_map = defaultdict(list)
+            for coin in coins:
+                sym = coin["symbol"].upper()
+                c_id = coin["id"]
+                # Optimization: CoinGecko has 10k+ junk coins.
+                # If we have 100 collisions for 'ETH', checking all of them is slow.
+                # We append all, but later we can limit request size if needed.
+                self._crypto_map[sym].append(c_id)
+        except Exception as e:
+            print(f"Warning: Could not fetch crypto list: {e}")
+            self._crypto_map = {}
 
-            if qtype in ["EQUITY", "ETF", "INDEX", "MUTUALFUND", "FUTURE"]:
-                mcap = info.get("marketCap", 0)
+        return self._crypto_map
 
-                if qtype == "INDEX":
-                    mcap = 50_000_000_000
-                if qtype == "FUTURE":
-                    mcap = 10_000_000_000
+    def classify_bulk(self, symbols: List[str]) -> List[Dict[str, Any]]:
+        # 1. Deduplicate
+        unique_symbols = list({s.upper().strip() for s in symbols if s.strip()})
+        results_map = {}
+        to_process = []
 
-                scores["stock"] = mcap
-                details["stock"] = {"type": qtype, "name": info.get("shortName")}
-        except:
-            pass
+        # 2. Check Shortcuts & Cache
+        cached_data = self._get_many_from_cache(unique_symbols)
 
-        # 5. Crypto Check
-        try:
-            results = self.cg.search(query=symbol)
-            for coin in results.get("coins", []):
-                if coin["symbol"].upper() == symbol:
-                    rank = coin.get("market_cap_rank")
-                    est_mcap = 0
-                    if rank:
-                        if rank <= 10:
-                            est_mcap = 100_000_000_000
-                        elif rank <= 500:
-                            est_mcap = 100_000_000
-                        else:
-                            est_mcap = 500_000
+        for sym in unique_symbols:
+            if sym in self.shortcuts:
+                results_map[sym] = self.shortcuts[sym]
+                results_map[sym]["source"] = "shortcut"
+            elif sym in cached_data:
+                results_map[sym] = cached_data[sym]
+            else:
+                to_process.append(sym)
 
-                    if est_mcap > scores["crypto"]:
-                        scores["crypto"] = est_mcap
-                        details["crypto"] = {"type": "Crypto", "name": coin.get("name")}
-        except:
-            pass
+        if not to_process:
+            return [results_map.get(s.upper().strip()) for s in symbols]
 
-        # 6. Resolve Winner
-        winner = max(scores, key=scores.get)
-
-        if scores[winner] == 0:
-            return {"type": "Unknown", "ticker": symbol}
-
-        final_data = details.get(winner, {})
-        alternatives = [k for k, v in scores.items() if v > 0 and k != winner]
-
-        result = {
-            "category": (winner if winner != "stock" else final_data.get("type")),
-            "ticker": symbol,
-            "name": final_data.get("name"),
-            "yahoo_lookup": symbol if winner != "crypto" else f"{symbol}-USD",
-            "alternatives": alternatives,
+        # 3. PREPARE DATA STRUCTURE
+        duel_data = {
+            s: {"stock": 0, "crypto": 0, "forex": 0, "details": {}} for s in to_process
         }
 
-        # 7. SAVE TO CACHE
-        if result["category"] != "Unknown":
-            self._save_to_cache(symbol, result)
-        else:
-            # Don't cache failures
-            pass
+        # --- A. FOREX ---
+        for sym in to_process:
+            if sym in self.major_forex:
+                duel_data[sym]["forex"] = 100_000_000_000_000
+            elif sym in self.minor_forex:
+                duel_data[sym]["forex"] = 50_000_000
 
-        result["source"] = "api"
-        return result
+        # --- B. STOCKS (Yahoo) ---
+        if to_process:
+            try:
+                batch_str = " ".join(to_process)
+                tickers = yf.Tickers(batch_str)
+                for sym, ticker_obj in tickers.tickers.items():
+                    sym_clean = sym.upper()
+                    if sym_clean in duel_data:
+                        try:
+                            info = ticker_obj.info
+                            qtype = info.get("quoteType")
+                            if qtype in [
+                                "EQUITY",
+                                "ETF",
+                                "INDEX",
+                                "MUTUALFUND",
+                                "FUTURE",
+                            ]:
+                                mcap = info.get("marketCap", 0)
+                                if qtype == "INDEX":
+                                    mcap = 50_000_000_000
+                                if qtype == "FUTURE":
+                                    mcap = 10_000_000_000
+                                duel_data[sym_clean]["stock"] = mcap
+                                duel_data[sym_clean]["details"]["stock"] = {
+                                    "type": qtype,
+                                    "name": info.get("shortName"),
+                                }
+                        except:
+                            pass
+            except:
+                pass
 
-    def prune_database(self):
-        """
-        Call this occasionally (e.g. once a week) to physically delete
-        old rows and keep the file size small.
-        """
-        cutoff_time = datetime.now() - timedelta(hours=self.hours_to_expire)
-        cutoff_str = cutoff_time.isoformat()
+        # --- C. CRYPTO (Revised for Collisions) ---
+        crypto_map = self._get_crypto_map()
 
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM tickers WHERE updated_at <= ?", (cutoff_str,))
-            deleted_count = cursor.rowcount
-            conn.commit()
-            print(f"Cleaned up {deleted_count} expired records.")
+        # 1. Gather ALL candidate IDs for our symbols
+        # e.g. for "BTC", gather ["bitcoin", "batcat", ...]
+        all_candidate_ids = []
+        id_to_parent_symbol = {}  # map 'batcat' -> 'BTC'
+
+        for sym in to_process:
+            if sym in crypto_map:
+                candidates = crypto_map[sym]
+                # SAFETY LIMIT: If a symbol has 50+ clones, only check the first 10
+                # + any that exactly match the symbol name (heuristic for "real" one)
+                # CoinGecko usually puts the oldest/biggest first, but not always.
+                candidates = candidates[:10]
+
+                for c_id in candidates:
+                    all_candidate_ids.append(c_id)
+                    id_to_parent_symbol[c_id] = sym
+
+        # 2. Batch fetch prices for ALL candidates
+        if all_candidate_ids:
+            chunk_size = 200  # CoinGecko can handle large URL params usually
+            for i in range(0, len(all_candidate_ids), chunk_size):
+                chunk = all_candidate_ids[i : i + chunk_size]
+                try:
+                    data = self.cg.get_price(
+                        ids=chunk, vs_currencies="usd", include_market_cap="true"
+                    )
+
+                    for c_id, val in data.items():
+                        parent_sym = id_to_parent_symbol.get(c_id)
+                        if parent_sym:
+                            mcap = val.get("usd_market_cap", 0)
+
+                            # LOGIC: Does this coin beat the current best crypto for this symbol?
+                            current_best = duel_data[parent_sym]["crypto"]
+                            if mcap > current_best:
+                                duel_data[parent_sym]["crypto"] = mcap
+                                duel_data[parent_sym]["details"]["crypto"] = {
+                                    "type": "Crypto",
+                                    "name": c_id.title(),
+                                    "id": c_id,  # Store the specific ID (e.g. 'bitcoin')
+                                }
+                except Exception as e:
+                    print(f"CoinGecko Batch Error: {e}")
+
+        # --- D. RESOLVE ---
+        processed_results = {}
+        for sym in to_process:
+            scores = duel_data[sym]
+            winner = max(["stock", "crypto", "forex"], key=lambda k: scores[k])
+
+            if scores[winner] == 0:
+                final_res = {"category": "Unknown", "ticker": sym}
+            else:
+                details = scores["details"].get(winner, {})
+                alternatives = [
+                    k
+                    for k in ["stock", "crypto", "forex"]
+                    if scores[k] > 0 and k != winner
+                ]
+
+                # Setup Yahoo Lookup
+                y_lookup = sym
+                if winner == "crypto":
+                    # If Crypto wins, we need the specific pair.
+                    # Best guess is Symbol-USD, but ideally we'd use the ID if we had a map.
+                    y_lookup = f"{sym}-USD"
+                elif winner == "forex":
+                    y_lookup = f"{sym}USD=X"
+
+                final_res = {
+                    "category": winner if winner != "stock" else details.get("type"),
+                    "ticker": sym,
+                    "name": details.get("name"),
+                    "yahoo_lookup": y_lookup,
+                    "alternatives": alternatives,
+                    "source": "api",
+                }
+
+            results_map[sym] = final_res
+            processed_results[sym] = final_res
+
+        self._save_many_to_cache(processed_results)
+        return [results_map.get(s.upper().strip()) for s in symbols]
+
+    def classify(self, symbol: str) -> Dict[str, Any]:
+        return self.classify_bulk([symbol])[0]
 
 
 if __name__ == "__main__":
     resolver = MarketClassifier()
-    tests = ["NVDA", "EUR", "ALL", "PEPE", "CUBE", "SPY"]
+    # BTC = Bitcoin (Huge Mcap), not Batcat (Tiny Mcap)
+    # PEPE = Pepe (Medium Mcap), not the 50 other fake Pepes
+    test_tickers = ["BTC", "PEPE", "NVDA"]
 
-    print(f"{'INPUT':<8} | {'SOURCE':<8} | {'CATEGORY':<10} | {'NAME'}")
-    print("-" * 60)
-
-    # Run twice to prove caching works
-    for _ in range(2):
-        for t in tests:
-            res = resolver.classify(t)
-            source = res.get("source", "shortcut")
-            name = res.get("name", "N/A")
-            print(f"{t:<8} | {source:<8} | {res['category']:<10} | {name}")
-        print("-" * 60)
-        print("Running again... (Should be instant and say 'cache')")
-        print("-" * 60)
+    print("Classifying...")
+    res = resolver.classify_bulk(test_tickers)
+    for r in res:
+        print(f"{r['ticker']} -> {r['name']} ({r['category']})")

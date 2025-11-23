@@ -77,6 +77,15 @@ async def main():
 asyncio.run(main())
 ```
 
+The output for each symbol is a dictionary like:
+
+```python
+{'category': 'EQUITY', 'ticker': 'AAPL', 'name': 'Apple Inc.', 'market_cap': 4029017227264, 'yahoo_lookup': 'AAPL', 'alternatives': ['crypto'], 'source': 'api'}
+{'category': 'crypto', 'ticker': 'BTC', 'name': 'Bitcoin', 'market_cap': 1736590593460.9607, 'yahoo_lookup': 'BTC-USD', 'alternatives': ['stock'], 'source': 'api'}
+{'category': 'crypto', 'ticker': 'ETH', 'name': 'Ethereum', 'market_cap': 338145915081.1455, 'yahoo_lookup': 'ETH-USD', 'alternatives': ['stock'], 'source': 'cache'}
+{'category': 'forex', 'ticker': 'JPY', 'name': 'JPY Currency', 'market_cap': None, 'yahoo_lookup': 'JPYUSD=X', 'alternatives': ['stock'], 'source': 'cache'}
+```
+
 Notes
 - The classifier caches positive classifications (non-`Unknown`) in an
 SQLite database (default `ticker_cache.db`) for `24` hours by default.

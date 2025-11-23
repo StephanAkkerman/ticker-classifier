@@ -114,6 +114,8 @@ class MarketClassifier:
             if sym in self.shortcuts:
                 results_map[sym] = self.shortcuts[sym]
                 results_map[sym]["source"] = "shortcut"
+                # Shortcuts usually don't have mcap data unless we hardcode it
+                results_map[sym]["market_cap"] = None
             elif sym in cached_data:
                 results_map[sym] = cached_data[sym]
             else:
@@ -123,6 +125,7 @@ class MarketClassifier:
             return [results_map.get(s.upper().strip()) for s in symbols]
 
         # 3. PREPARE DATA STRUCTURE
+        # Structure: scores used for the "Duel", details used for the "Result"
         duel_data = {
             s: {"stock": 0, "crypto": 0, "forex": 0, "details": {}} for s in to_process
         }
@@ -130,9 +133,19 @@ class MarketClassifier:
         # --- A. FOREX ---
         for sym in to_process:
             if sym in self.major_forex:
-                duel_data[sym]["forex"] = 100_000_000_000_000
+                duel_data[sym]["forex"] = 100_000_000_000_000  # Heuristic Score
+                duel_data[sym]["details"]["forex"] = {
+                    "type": "Forex",
+                    "name": f"{sym} Currency",
+                    "market_cap": None,
+                }
             elif sym in self.minor_forex:
-                duel_data[sym]["forex"] = 50_000_000
+                duel_data[sym]["forex"] = 50_000_000  # Heuristic Score
+                duel_data[sym]["details"]["forex"] = {
+                    "type": "Forex",
+                    "name": f"{sym} Currency",
+                    "market_cap": None,
+                }
 
         # --- B. STOCKS (Yahoo) ---
         if to_process:
@@ -152,44 +165,46 @@ class MarketClassifier:
                                 "MUTUALFUND",
                                 "FUTURE",
                             ]:
-                                mcap = info.get("marketCap", 0)
+
+                                raw_mcap = info.get("marketCap")  # The REAL number
+                                ranking_score = raw_mcap if raw_mcap else 0
+
+                                # Boost logic for things that might lack Mcap in Yahoo but are "Big"
                                 if qtype == "INDEX":
-                                    mcap = 50_000_000_000
+                                    ranking_score = (
+                                        50_000_000_000  # 50B boost for ranking
+                                    )
                                 if qtype == "FUTURE":
-                                    mcap = 10_000_000_000
-                                duel_data[sym_clean]["stock"] = mcap
+                                    ranking_score = (
+                                        10_000_000_000  # 10B boost for ranking
+                                    )
+
+                                duel_data[sym_clean]["stock"] = ranking_score
                                 duel_data[sym_clean]["details"]["stock"] = {
                                     "type": qtype,
                                     "name": info.get("shortName"),
+                                    "market_cap": raw_mcap,  # Save the real number (or None)
                                 }
                         except:
                             pass
             except:
                 pass
 
-        # --- C. CRYPTO (Revised for Collisions) ---
+        # --- C. CRYPTO (With Mcap Capture) ---
         crypto_map = self._get_crypto_map()
 
-        # 1. Gather ALL candidate IDs for our symbols
-        # e.g. for "BTC", gather ["bitcoin", "batcat", ...]
         all_candidate_ids = []
-        id_to_parent_symbol = {}  # map 'batcat' -> 'BTC'
+        id_to_parent_symbol = {}
 
         for sym in to_process:
             if sym in crypto_map:
-                candidates = crypto_map[sym]
-                # SAFETY LIMIT: If a symbol has 50+ clones, only check the first 10
-                # + any that exactly match the symbol name (heuristic for "real" one)
-                # CoinGecko usually puts the oldest/biggest first, but not always.
-                candidates = candidates[:10]
-
+                candidates = crypto_map[sym][:10]  # Top 10 collisions
                 for c_id in candidates:
                     all_candidate_ids.append(c_id)
                     id_to_parent_symbol[c_id] = sym
 
-        # 2. Batch fetch prices for ALL candidates
         if all_candidate_ids:
-            chunk_size = 200  # CoinGecko can handle large URL params usually
+            chunk_size = 200
             for i in range(0, len(all_candidate_ids), chunk_size):
                 chunk = all_candidate_ids[i : i + chunk_size]
                 try:
@@ -200,16 +215,18 @@ class MarketClassifier:
                     for c_id, val in data.items():
                         parent_sym = id_to_parent_symbol.get(c_id)
                         if parent_sym:
-                            mcap = val.get("usd_market_cap", 0)
+                            raw_mcap = val.get("usd_market_cap", 0)
 
-                            # LOGIC: Does this coin beat the current best crypto for this symbol?
-                            current_best = duel_data[parent_sym]["crypto"]
-                            if mcap > current_best:
-                                duel_data[parent_sym]["crypto"] = mcap
+                            # Compare against current best crypto candidate for this symbol
+                            current_best_score = duel_data[parent_sym]["crypto"]
+
+                            if raw_mcap > current_best_score:
+                                duel_data[parent_sym]["crypto"] = raw_mcap  # Score
                                 duel_data[parent_sym]["details"]["crypto"] = {
                                     "type": "Crypto",
                                     "name": c_id.title(),
-                                    "id": c_id,  # Store the specific ID (e.g. 'bitcoin')
+                                    "id": c_id,
+                                    "market_cap": raw_mcap,  # Real Number
                                 }
                 except Exception as e:
                     print(f"CoinGecko Batch Error: {e}")
@@ -230,11 +247,8 @@ class MarketClassifier:
                     if scores[k] > 0 and k != winner
                 ]
 
-                # Setup Yahoo Lookup
                 y_lookup = sym
                 if winner == "crypto":
-                    # If Crypto wins, we need the specific pair.
-                    # Best guess is Symbol-USD, but ideally we'd use the ID if we had a map.
                     y_lookup = f"{sym}-USD"
                 elif winner == "forex":
                     y_lookup = f"{sym}USD=X"
@@ -243,6 +257,7 @@ class MarketClassifier:
                     "category": winner if winner != "stock" else details.get("type"),
                     "ticker": sym,
                     "name": details.get("name"),
+                    "market_cap": details.get("market_cap"),  # <--- NEW FIELD
                     "yahoo_lookup": y_lookup,
                     "alternatives": alternatives,
                     "source": "api",
@@ -260,11 +275,11 @@ class MarketClassifier:
 
 if __name__ == "__main__":
     resolver = MarketClassifier()
-    # BTC = Bitcoin (Huge Mcap), not Batcat (Tiny Mcap)
-    # PEPE = Pepe (Medium Mcap), not the 50 other fake Pepes
-    test_tickers = ["BTC", "PEPE", "NVDA"]
+    tickers = ["NVDA", "BTC", "EUR"]
+    results = resolver.classify_bulk(tickers)
+    for r in results:
+        mcap = r.get("market_cap")
+        # Simple helper to format nicely
+        mcap_str = f"${mcap:,.0f}" if isinstance(mcap, (int, float)) else "N/A"
 
-    print("Classifying...")
-    res = resolver.classify_bulk(test_tickers)
-    for r in res:
-        print(f"{r['ticker']} -> {r['name']} ({r['category']})")
+        print(f"{r['ticker']} | {r['category']} | Cap: {mcap_str}")

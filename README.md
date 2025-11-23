@@ -52,11 +52,11 @@ pip install git+https://github.com/StephanAkkerman/ticker-classifier.git
 Basic synchronous usage:
 
 ```python
-from ticker_classifier.classifier import MarketClassifier
+from ticker_classifier.classifier import TickerClassifier
 
-classifier = MarketClassifier()
+classifier = TickerClassifier()
 symbols = ["AAPL", "BTC", "EUR", "GOLD", "UNKNOWN123"]
-results = classifier.classify_bulk(symbols)
+results = classifier.classify(symbols)
 for r in results:
     print(r)
 ```
@@ -65,12 +65,12 @@ Example asynchronous usage:
 
 ```python
 import asyncio
-from ticker_classifier.classifier import MarketClassifier
+from ticker_classifier.classifier import TickerClassifier
 
 async def main():
-    classifier = MarketClassifier()
+    classifier = TickerClassifier()
     symbols = ["AAPL", "BTC", "ETH", "JPY"]
-    results = await classifier.classify_bulk_async(symbols)
+    results = await classifier.classify_async(symbols)
     for r in results:
         print(r)
 
@@ -81,11 +81,11 @@ Notes
 - The classifier caches positive classifications (non-`Unknown`) in an
 SQLite database (default `ticker_cache.db`) for `24` hours by default.
 - You can customize the cache filename and expiry by passing `db_name` and
-`hours_to_expire` to `MarketClassifier`.
+`hours_to_expire` to `TickerClassifier`.
 
 ## API
 
-- `ticker_classifier.classifier.MarketClassifier`
+- `ticker_classifier.classifier.TickerClassifier`
 - `classify_bulk(symbols: List[str]) -> List[dict]` – synchronous bulk
     classification.
 - `classify_bulk_async(symbols: List[str]) -> List[dict]` – async bulk
@@ -93,7 +93,7 @@ SQLite database (default `ticker_cache.db`) for `24` hours by default.
 
 - `ticker_classifier.apis.yahoo.YahooClient` – low-level Yahoo quote fetcher (sync + async helpers).
 - `ticker_classifier.apis.coingecko.CoinGeckoClient` – crypto lookup + market cap helpers (sync + async).
-- `ticker_classifier.db.cache.TickerCache` – tiny SQLite-backed cache used by `MarketClassifier`.
+- `ticker_classifier.db.cache.TickerCache` – tiny SQLite-backed cache used by `TickerClassifier`.
 
 ## Development
 

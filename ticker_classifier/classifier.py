@@ -57,6 +57,10 @@ class TickerClassifier:
             s: {"stock": 0, "crypto": 0, "forex": 0, "details": {}} for s in to_process
         }
 
+        # 1 MILLION USD THRESHOLD
+        # If a crypto is smaller than this, we treat it as "Noise" if it clashes with a stock ticker.
+        MIN_CRYPTO_MCAP = 1_000_000
+
         for sym in to_process:
             # 1. Forex Heuristics
             if sym in MAJOR_FOREX:
@@ -80,10 +84,17 @@ class TickerClassifier:
                 qtype = info.get("quoteType", "UNKNOWN")
                 raw_mcap = info.get("marketCap", 0)
                 score = raw_mcap
+
+                # Boost logic
                 if qtype == "INDEX":
                     score = 50_000_000_000
                 if qtype == "FUTURE":
                     score = 10_000_000_000
+
+                # If we found a valid stock object but mcap is missing/0,
+                # give it a base score so it beats tiny cryptos.
+                if score == 0 and qtype in ["EQUITY", "ETF"]:
+                    score = 250_000  # Assume at least micro-cap stock
 
                 duel[sym]["stock"] = score
                 duel[sym]["details"]["stock"] = {
@@ -107,7 +118,17 @@ class TickerClassifier:
             scores = duel[sym]
             winner = max(["stock", "crypto", "forex"], key=lambda k: scores[k])
 
-            if scores[winner] == 0:
+            # If Crypto won, but it's tiny (< $1M), and we tried to look up a Stock...
+            # It's highly likely this is a "Fake" token or the Yahoo lookup failed.
+            if winner == "crypto":
+                mcap = scores["crypto"]
+                if mcap < MIN_CRYPTO_MCAP:
+                    # If the stock score was 0 (Yahoo failed), we'd rather return "Unknown"
+                    # than return a $1,000 junk token for "NVDA".
+                    winner = "unknown"
+
+            # Construct Result
+            if winner == "unknown" or scores[winner] == 0:
                 final = {"category": "Unknown", "ticker": sym}
             else:
                 details = scores["details"].get(winner, {})

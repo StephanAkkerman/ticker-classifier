@@ -86,11 +86,8 @@ SQLite database (default `ticker_cache.db`) for `24` hours by default.
 ## API
 
 - `ticker_classifier.classifier.TickerClassifier`
-- `classify_bulk(symbols: List[str]) -> List[dict]` – synchronous bulk
-    classification.
-- `classify_bulk_async(symbols: List[str]) -> List[dict]` – async bulk
-    classification.
-
+- `classify(symbols: List[str]) -> List[dict]` – synchronous classification.
+- `classify_async(symbols: List[str]) -> List[dict]` – async classification.
 - `ticker_classifier.apis.yahoo.YahooClient` – low-level Yahoo quote fetcher (sync + async helpers).
 - `ticker_classifier.apis.coingecko.CoinGeckoClient` – crypto lookup + market cap helpers (sync + async).
 - `ticker_classifier.db.cache.TickerCache` – tiny SQLite-backed cache used by `TickerClassifier`.

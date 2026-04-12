@@ -33,6 +33,9 @@ It uses Yahoo Finance for equities, CoinGecko for cryptocurrencies and a few heu
 - Adds `sector` and `industry` metadata for many equity tickers (for example `AAPL`, `NVDA`).
 - Adds a compact `company_profile` payload for equity/ETF symbols (exchange, country, currency, industry group, website, market-cap category).
 - Uses multiple public APIs and simple heuristics to make robust decisions.
+- Uses a generic Yahoo search fallback for unknown symbols so index names/aliases (for example `NASDAQ`, `FTSE`, `HANGSENG`) can be resolved without manual per-ticker shortcuts.
+- Uses exact CoinGecko coin-name matching to resolve name-style crypto queries (for example `BITCOIN`) and returns canonical symbols (`BTC`) instead of unrelated meme/derivative coins.
+- When CoinGecko price/market-cap requests are rate-limited or unavailable, crypto candidates can fallback to TradingView quote data to keep category detection resilient.
 - Provides both synchronous and asynchronous APIs.
 - Lightweight disk cache to avoid repeated lookups (`TickerCache`).
 

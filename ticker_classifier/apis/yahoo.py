@@ -19,6 +19,7 @@ API_BASE = "https://query2.finance.yahoo.com"
 COOKIE_URL = "https://fc.yahoo.com"
 CRUMB_URL = API_BASE + "/v1/test/getcrumb"
 QUOTE_URL = API_BASE + "/v7/finance/quote"
+SEARCH_URL = API_BASE + "/v1/finance/search"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -223,3 +224,91 @@ class YahooClient:
             print(f"Yahoo Async Request Error: {e}")
 
         return results
+
+    def search_quotes_sync(self, query: str, quotes_count: int = 12) -> List[Dict]:
+        """Search Yahoo Finance instruments by free-text query.
+
+        Parameters
+        ----------
+        query : str
+            Free-text query (e.g. ``"NASDAQ"`` or ``"HANG SENG"``).
+        quotes_count : int, optional
+            Maximum number of quote candidates to request.
+
+        Returns
+        -------
+        list[dict]
+            Candidate quote rows from Yahoo search API. Empty on failures.
+        """
+
+        normalized = (query or "").strip()
+        if not normalized:
+            return []
+
+        creds = self._get_credentials_sync()
+        if not creds:
+            return []
+
+        try:
+            params = {
+                "q": normalized,
+                "quotesCount": max(1, int(quotes_count)),
+                "newsCount": 0,
+                "crumb": creds["crumb"],
+            }
+            resp = requests.get(
+                SEARCH_URL,
+                params=params,
+                cookies=creds["cookie"],
+                headers=HEADERS,
+                timeout=6,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                quotes = data.get("quotes")
+                if isinstance(quotes, list):
+                    return [q for q in quotes if isinstance(q, dict)]
+            elif resp.status_code == 401:
+                self.credentials = None
+        except Exception:
+            return []
+
+        return []
+
+    async def search_quotes_async(
+        self, session: aiohttp.ClientSession, query: str, quotes_count: int = 12
+    ) -> List[Dict]:
+        """Asynchronously search Yahoo Finance instruments by free-text query."""
+
+        normalized = (query or "").strip()
+        if not normalized:
+            return []
+
+        creds = await self._get_credentials_async(session)
+        if not creds:
+            return []
+
+        try:
+            params = {
+                "q": normalized,
+                "quotesCount": max(1, int(quotes_count)),
+                "newsCount": 0,
+                "crumb": creds["crumb"],
+            }
+            async with session.get(
+                SEARCH_URL,
+                params=params,
+                cookies=creds["cookie"],
+                headers=HEADERS,
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    quotes = data.get("quotes")
+                    if isinstance(quotes, list):
+                        return [q for q in quotes if isinstance(q, dict)]
+                elif resp.status == 401:
+                    self.credentials = None
+        except Exception:
+            return []
+
+        return []

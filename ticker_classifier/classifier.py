@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import Dict, List
 
 import aiohttp
@@ -25,6 +26,183 @@ class TickerClassifier:
         self.yahoo = YahooClient()
         self.cg = CoinGeckoClient()
         self.sectors = EquitySectorLookup()
+
+    @staticmethod
+    def _normalize_token(value: str) -> str:
+        return re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+
+    def _search_query_candidates(self, symbol: str) -> List[str]:
+        normalized = (symbol or "").strip().upper()
+        if not normalized:
+            return []
+
+        candidates = [normalized]
+        if normalized.isalpha() and 6 <= len(normalized) <= 12:
+            # Generic fallback for concatenated index names (e.g. HANGSENG).
+            for idx in range(3, len(normalized) - 2):
+                candidates.append(f"{normalized[:idx]} {normalized[idx:]}")
+
+        # Deduplicate while preserving order.
+        seen = set()
+        unique: List[str] = []
+        for cand in candidates:
+            if cand in seen:
+                continue
+            seen.add(cand)
+            unique.append(cand)
+        return unique
+
+    def _score_search_quote(self, symbol: str, quote: Dict, query: str) -> float:
+        qtype = str(quote.get("quoteType") or "").upper()
+        symbol_norm = self._normalize_token(symbol)
+        query_norm = self._normalize_token(query)
+        found_symbol = self._normalize_token(str(quote.get("symbol") or ""))
+        name = (
+            str(quote.get("shortname") or "")
+            or str(quote.get("longname") or "")
+            or str(quote.get("name") or "")
+        )
+        name_norm = self._normalize_token(name)
+
+        score = 0.0
+        if qtype == "INDEX":
+            score += 8.0
+        elif qtype == "FUTURE":
+            score += 7.0
+        elif qtype == "ETF":
+            score += 6.0
+        elif qtype == "EQUITY":
+            score += 5.0
+        elif qtype == "CRYPTOCURRENCY":
+            score += 4.0
+        else:
+            score -= 2.0
+
+        if query_norm and name_norm and query_norm in name_norm:
+            score += 3.0
+        if symbol_norm and name_norm and symbol_norm in name_norm:
+            score += 2.5
+        if query_norm and found_symbol and query_norm in found_symbol:
+            score += 2.0
+
+        raw_mcap = quote.get("marketCap")
+        if isinstance(raw_mcap, (int, float)) and raw_mcap > 0:
+            score += 0.5
+
+        return score
+
+    def _best_search_quote(
+        self, symbol: str, quotes: List[Dict], query: str
+    ) -> Dict | None:
+        best: tuple[float, Dict] | None = None
+        for quote in quotes:
+            score = self._score_search_quote(symbol, quote, query)
+            if best is None or score > best[0]:
+                best = (score, quote)
+        return best[1] if best else None
+
+    def _build_from_yahoo_info(
+        self, symbol: str, info: Dict, *, lookup_symbol: str, source: str
+    ) -> Dict:
+        qtype = str(info.get("quoteType") or "UNKNOWN").upper()
+        market_cap = info.get("marketCap", 0)
+
+        company_profile = {}
+        if qtype in ["EQUITY", "ETF"]:
+            company_profile = self.sectors.get_profile(lookup_symbol)
+
+        sector = info.get("sector") or info.get("sectorDisp")
+        industry = info.get("industry") or info.get("industryDisp")
+        if qtype in ["EQUITY", "ETF"] and (not sector or not industry):
+            if not sector:
+                sector = company_profile.get("sector")
+            if not industry:
+                industry = company_profile.get("industry")
+
+        return {
+            "category": qtype,
+            "ticker": symbol,
+            "name": info.get("shortName")
+            or info.get("longName")
+            or info.get("displayName"),
+            "market_cap": market_cap,
+            "sector": sector,
+            "industry": industry,
+            "company_profile": company_profile or None,
+            "yahoo_lookup": lookup_symbol,
+            "alternatives": [],
+            "source": source,
+        }
+
+    def _resolve_unknown_sync(self, symbol: str) -> Dict | None:
+        best_score = float("-inf")
+        best_symbol = ""
+        for query in self._search_query_candidates(symbol):
+            quotes = self.yahoo.search_quotes_sync(query, quotes_count=12)
+            if not quotes:
+                continue
+
+            for quote in quotes:
+                score = self._score_search_quote(symbol, quote, query)
+                lookup_symbol = str(quote.get("symbol") or "").strip().upper()
+                if not lookup_symbol:
+                    continue
+                if score > best_score:
+                    best_score = score
+                    best_symbol = lookup_symbol
+
+        if not best_symbol:
+            return None
+
+        quote_map = self.yahoo.get_quotes_sync([best_symbol])
+        info = quote_map.get(best_symbol)
+        if not info:
+            return None
+
+        qtype = str(info.get("quoteType") or "").upper()
+        if qtype in {"INDEX", "FUTURE", "ETF", "EQUITY", "MUTUALFUND"}:
+            return self._build_from_yahoo_info(
+                symbol, info, lookup_symbol=best_symbol, source="api-search"
+            )
+
+        return None
+
+    async def _resolve_unknown_async(
+        self, session: aiohttp.ClientSession, symbol: str
+    ) -> Dict | None:
+        best_score = float("-inf")
+        best_symbol = ""
+        for query in self._search_query_candidates(symbol):
+            quotes = await self.yahoo.search_quotes_async(
+                session, query, quotes_count=12
+            )
+            if not quotes:
+                continue
+
+            for quote in quotes:
+                score = self._score_search_quote(symbol, quote, query)
+                lookup_symbol = str(quote.get("symbol") or "").strip().upper()
+                if not lookup_symbol:
+                    continue
+                if score > best_score:
+                    best_score = score
+                    best_symbol = lookup_symbol
+
+        if not best_symbol:
+            return None
+
+        quote_map = await self.yahoo.get_quotes_async(session, [best_symbol])
+        info = quote_map.get(best_symbol)
+        if not info:
+            return None
+
+        qtype = str(info.get("quoteType") or "").upper()
+        if qtype in {"INDEX", "FUTURE", "ETF", "EQUITY", "MUTUALFUND"}:
+            return self._build_from_yahoo_info(
+                symbol, info, lookup_symbol=best_symbol, source="api-search"
+            )
+
+        return None
 
     def _hydrate_equity_metadata(self, symbol: str, item: Dict) -> Dict:
         """Backfill profile metadata for cached equity-like rows when missing."""
@@ -53,6 +231,27 @@ class TickerClassifier:
             updated["industry"] = updated_profile.get("industry")
         updated["company_profile"] = updated_profile
         return updated
+
+    @staticmethod
+    def _should_refresh_cached_crypto_alias(symbol: str, item: Dict) -> bool:
+        """Return True when a cached crypto entry likely came from a name alias.
+
+        Examples: BITCOIN, ETHEREUM. These should map to canonical symbols
+        (BTC/ETH) and can be stale in older caches.
+        """
+
+        category = str(item.get("category") or "").upper()
+        if category != "CRYPTO":
+            return False
+
+        cached_ticker = str(item.get("ticker") or "").upper()
+        normalized = str(symbol or "").upper()
+        if cached_ticker != normalized:
+            return False
+
+        # Generic heuristic: long alphabetic tokens are often names, not
+        # canonical crypto symbols.
+        return normalized.isalpha() and len(normalized) >= 6
 
     def _process_duel(
         self, to_process: List[str], yahoo_data: Dict, crypto_data: Dict
@@ -159,6 +358,7 @@ class TickerClassifier:
                 duel[sym]["details"]["crypto"] = {
                     "type": "Crypto",
                     "name": info.get("name"),
+                    "symbol": str(info.get("symbol") or "").upper() or sym,
                     "market_cap": mcap,
                 }
 
@@ -186,15 +386,17 @@ class TickerClassifier:
                     if scores[k] > 0 and k != winner
                 ]
 
+                ticker_out = sym
                 y_look = sym
                 if winner == "crypto":
-                    y_look = f"{sym}-USD"
+                    ticker_out = str(details.get("symbol") or sym).upper()
+                    y_look = f"{ticker_out}-USD"
                 elif winner == "forex":
                     y_look = f"{sym}USD=X"
 
                 final = {
                     "category": winner if winner != "stock" else details.get("type"),
-                    "ticker": sym,
+                    "ticker": ticker_out,
                     "name": details.get("name"),
                     "market_cap": details.get("market_cap"),
                     "sector": details.get("sector"),
@@ -233,9 +435,17 @@ class TickerClassifier:
             if sym in SHORTCUTS:
                 results_map[sym] = {**SHORTCUTS[sym], "source": "shortcut"}
             elif sym in cached:
-                hydrated = self._hydrate_equity_metadata(sym, cached[sym])
+                cached_item = cached[sym]
+                if str(cached_item.get("category") or "").upper() == "UNKNOWN":
+                    to_process.append(sym)
+                    continue
+                if self._should_refresh_cached_crypto_alias(sym, cached_item):
+                    to_process.append(sym)
+                    continue
+
+                hydrated = self._hydrate_equity_metadata(sym, cached_item)
                 results_map[sym] = hydrated
-                if hydrated != cached[sym]:
+                if hydrated != cached_item:
                     cache_updates[sym] = hydrated
             else:
                 to_process.append(sym)
@@ -247,6 +457,17 @@ class TickerClassifier:
             y_res = self.yahoo.get_quotes_sync(to_process)
             c_res = self.cg.get_prices_sync(to_process)
             processed = self._process_duel(to_process, y_res, c_res)
+
+            unknowns = [
+                sym
+                for sym, item in processed.items()
+                if str(item.get("category") or "").upper() == "UNKNOWN"
+            ]
+            for sym in unknowns:
+                resolved = self._resolve_unknown_sync(sym)
+                if resolved:
+                    processed[sym] = resolved
+
             self.cache.save_many(processed)
             results_map.update(processed)
 
@@ -280,9 +501,17 @@ class TickerClassifier:
             if sym in SHORTCUTS:
                 results_map[sym] = {**SHORTCUTS[sym], "source": "shortcut"}
             elif sym in cached:
-                hydrated = self._hydrate_equity_metadata(sym, cached[sym])
+                cached_item = cached[sym]
+                if str(cached_item.get("category") or "").upper() == "UNKNOWN":
+                    to_process.append(sym)
+                    continue
+                if self._should_refresh_cached_crypto_alias(sym, cached_item):
+                    to_process.append(sym)
+                    continue
+
+                hydrated = self._hydrate_equity_metadata(sym, cached_item)
                 results_map[sym] = hydrated
-                if hydrated != cached[sym]:
+                if hydrated != cached_item:
                     cache_updates[sym] = hydrated
             else:
                 to_process.append(sym)
@@ -296,7 +525,16 @@ class TickerClassifier:
                 task_c = self.cg.get_prices_async(session, to_process)
                 y_res, c_res = await asyncio.gather(task_y, task_c)
 
-            processed = self._process_duel(to_process, y_res, c_res)
+                processed = self._process_duel(to_process, y_res, c_res)
+                unknowns = [
+                    sym
+                    for sym, item in processed.items()
+                    if str(item.get("category") or "").upper() == "UNKNOWN"
+                ]
+                for sym in unknowns:
+                    resolved = await self._resolve_unknown_async(session, sym)
+                    if resolved:
+                        processed[sym] = resolved
 
             # Cache Write (Run in thread)
             await loop.run_in_executor(None, self.cache.save_many, processed)

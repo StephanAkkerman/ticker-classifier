@@ -147,6 +147,18 @@ MINOR_FOREX = {
 }
 
 SHORTCUTS = {
+    "DXY": {
+        "category": "Index",
+        "ticker": "DXY",
+        "name": "US Dollar Index",
+        "yahoo_lookup": "DX-Y.NYB",
+    },
+    "VIX": {
+        "category": "Index",
+        "ticker": "VIX",
+        "name": "CBOE Volatility Index",
+        "yahoo_lookup": "^VIX",
+    },
     "GOLD": {
         "category": "Commodity",
         "ticker": "GOLD",
@@ -170,5 +182,11 @@ SHORTCUTS = {
         "ticker": "SPX",
         "name": "S&P 500",
         "yahoo_lookup": "^GSPC",
+    },
+    "SPY": {
+        "category": "ETF",
+        "ticker": "SPY",
+        "name": "SPDR S&P 500 ETF Trust",
+        "yahoo_lookup": "SPY",
     },
 }

@@ -36,16 +36,9 @@ It uses Yahoo Finance for equities, CoinGecko for cryptocurrencies and a few heu
 
 ## Installation ⚙️
 
-Install from pip using the provided `requirements.txt` or install the package directly from the repository for latest changes:
-
+Install from pypi using this command:
 ```bash
-pip install -r requirements.txt
-```
-
-or
-
-```bash
-pip install git+https://github.com/StephanAkkerman/ticker-classifier.git
+pip install ticker-classifier
 ```
 
 ## Usage ⌨️

@@ -27,23 +27,31 @@ class TickerClassifier:
         self.sectors = EquitySectorLookup()
 
     def _hydrate_equity_metadata(self, symbol: str, item: Dict) -> Dict:
-        """Backfill sector/industry for cached equity-like rows when missing."""
+        """Backfill profile metadata for cached equity-like rows when missing."""
         category = str(item.get("category", "")).upper()
         if category not in {"EQUITY", "ETF"}:
             return item
 
-        if item.get("sector") and item.get("industry"):
+        has_sector = bool(item.get("sector"))
+        has_industry = bool(item.get("industry"))
+        has_profile = isinstance(item.get("company_profile"), dict)
+
+        if has_sector and has_industry and has_profile:
             return item
 
-        sector, industry = self.sectors.get(symbol)
-        if not sector and not industry:
+        profile = self.sectors.get_profile(symbol)
+        if not profile:
             return item
 
         updated = dict(item)
+        updated_profile = dict(updated.get("company_profile") or {})
+        updated_profile.update(profile)
+
         if not updated.get("sector"):
-            updated["sector"] = sector
+            updated["sector"] = updated_profile.get("sector")
         if not updated.get("industry"):
-            updated["industry"] = industry
+            updated["industry"] = updated_profile.get("industry")
+        updated["company_profile"] = updated_profile
         return updated
 
     def _process_duel(
@@ -72,7 +80,7 @@ class TickerClassifier:
             Mapping of symbol -> final classification dict containing keys
             such as `category`, `ticker`, `name`, `market_cap`, and
             `yahoo_lookup`, plus optional equity metadata (`sector`,
-            `industry`).
+            `industry`, `company_profile`).
         """
         processed = {}
         # Init structure
@@ -107,11 +115,16 @@ class TickerClassifier:
                 qtype = info.get("quoteType", "UNKNOWN")
                 raw_mcap = info.get("marketCap", 0)
                 score = raw_mcap
+                company_profile = {}
+                if qtype in ["EQUITY", "ETF"]:
+                    company_profile = self.sectors.get_profile(sym)
+
                 sector = info.get("sector") or info.get("sectorDisp")
                 industry = info.get("industry") or info.get("industryDisp")
 
                 if qtype in ["EQUITY", "ETF"] and (not sector or not industry):
-                    db_sector, db_industry = self.sectors.get(sym)
+                    db_sector = company_profile.get("sector")
+                    db_industry = company_profile.get("industry")
                     if not sector:
                         sector = db_sector
                     if not industry:
@@ -135,6 +148,7 @@ class TickerClassifier:
                     "market_cap": raw_mcap,
                     "sector": sector,
                     "industry": industry,
+                    "company_profile": company_profile or None,
                 }
 
             # 3. Crypto Data
@@ -185,6 +199,7 @@ class TickerClassifier:
                     "market_cap": details.get("market_cap"),
                     "sector": details.get("sector"),
                     "industry": details.get("industry"),
+                    "company_profile": details.get("company_profile"),
                     "yahoo_lookup": y_look,
                     "alternatives": alternatives,
                     "source": "api",

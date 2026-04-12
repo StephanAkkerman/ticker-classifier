@@ -31,6 +31,7 @@ It uses Yahoo Finance for equities, CoinGecko for cryptocurrencies and a few heu
 
 - Classify symbols as `Equity`, `Crypto`, `Forex`, `Commodity`, `Index` or `Unknown`.
 - Adds `sector` and `industry` metadata for many equity tickers (for example `AAPL`, `NVDA`).
+- Adds a compact `company_profile` payload for equity/ETF symbols (exchange, country, currency, industry group, website, market-cap category).
 - Uses multiple public APIs and simple heuristics to make robust decisions.
 - Provides both synchronous and asynchronous APIs.
 - Lightweight disk cache to avoid repeated lookups (`TickerCache`).
@@ -75,7 +76,7 @@ asyncio.run(main())
 The output for each symbol is a dictionary like:
 
 ```python
-{'category': 'EQUITY', 'ticker': 'AAPL', 'name': 'Apple Inc.', 'market_cap': 4029017227264, 'sector': 'Information Technology', 'industry': 'Electronic Equipment, Instruments & Components', 'yahoo_lookup': 'AAPL', 'alternatives': ['crypto'], 'source': 'api'}
+{'category': 'EQUITY', 'ticker': 'AAPL', 'name': 'Apple Inc.', 'market_cap': 4029017227264, 'sector': 'Information Technology', 'industry': 'Electronic Equipment, Instruments & Components', 'company_profile': {'industry_group': 'Technology Hardware & Equipment', 'country': 'United States', 'exchange': 'NASDAQ Global Select', 'currency': 'USD', 'website': 'http://www.apple.com', 'market_cap_category': 'Mega Cap'}, 'yahoo_lookup': 'AAPL', 'alternatives': ['crypto'], 'source': 'api'}
 {'category': 'crypto', 'ticker': 'BTC', 'name': 'Bitcoin', 'market_cap': 1736590593460.9607, 'yahoo_lookup': 'BTC-USD', 'alternatives': ['stock'], 'source': 'api'}
 {'category': 'crypto', 'ticker': 'ETH', 'name': 'Ethereum', 'market_cap': 338145915081.1455, 'yahoo_lookup': 'ETH-USD', 'alternatives': ['stock'], 'source': 'cache'}
 {'category': 'forex', 'ticker': 'JPY', 'name': 'JPY Currency', 'market_cap': None, 'yahoo_lookup': 'JPYUSD=X', 'alternatives': ['stock'], 'source': 'cache'}

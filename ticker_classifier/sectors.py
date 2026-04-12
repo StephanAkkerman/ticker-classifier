@@ -1,10 +1,10 @@
-"""Equity sector and industry lookup utilities.
+"""Equity metadata lookup utilities.
 
-This module provides a lazy-loaded lookup for equity sector metadata,
-using ``financedatabase`` when available.
+This module provides a lazy-loaded lookup for equity metadata sourced from
+``financedatabase`` when available.
 """
 
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 
 def _clean_text(value: object) -> Optional[str]:
@@ -37,17 +37,11 @@ class EquitySectorLookup:
         except Exception:
             self._data = None
 
-    def get(self, symbol: str) -> Tuple[Optional[str], Optional[str]]:
-        """Return ``(sector, industry)`` for ``symbol`` when available."""
-        sym = str(symbol or "").strip().upper()
-        if not sym:
-            return None, None
+    def _select_row(self, symbol: str):
+        if self._data is None or symbol not in self._data.index:
+            return None
 
-        self._load()
-        if self._data is None or sym not in self._data.index:
-            return None, None
-
-        row = self._data.loc[sym]
+        row = self._data.loc[symbol]
 
         # Multiple listings can share the same symbol; prefer US row if present.
         if getattr(row, "ndim", 1) == 2:
@@ -58,13 +52,47 @@ class EquitySectorLookup:
                     rows = us_rows
             row = rows.iloc[0]
 
-        sector = _clean_text(getattr(row, "get", lambda *_: None)("sector"))
-        industry = _clean_text(getattr(row, "get", lambda *_: None)("industry"))
+        return row
+
+    def get_profile(self, symbol: str) -> Dict[str, str]:
+        """Return a compact profile for ``symbol`` when available.
+
+        The returned dictionary is empty when data is unavailable.
+        """
+        sym = str(symbol or "").strip().upper()
+        if not sym:
+            return {}
+
+        self._load()
+        row = self._select_row(sym)
+        if row is None:
+            return {}
+
+        def _get(key: str) -> Optional[str]:
+            return _clean_text(getattr(row, "get", lambda *_: None)(key))
+
+        profile: Dict[str, Any] = {
+            "sector": _get("sector"),
+            "industry_group": _get("industry_group"),
+            "industry": _get("industry"),
+            "country": _get("country"),
+            "exchange": _get("market") or _get("exchange"),
+            "currency": _get("currency"),
+            "website": _get("website"),
+            "market_cap_category": _get("market_cap"),
+        }
+
+        return {k: v for k, v in profile.items() if v}
+
+    def get(self, symbol: str) -> Tuple[Optional[str], Optional[str]]:
+        """Return ``(sector, industry)`` for ``symbol`` when available."""
+        profile = self.get_profile(symbol)
+        sector = profile.get("sector")
+        industry = profile.get("industry")
         return sector, industry
 
 
 if __name__ == "__main__":
     lookup = EquitySectorLookup()
     for sym in ["AAPL", "NVDA", "MSFT", "GOOGL", "AMZN", "TSLA", "BRK.A", "V", "JPM"]:
-        sector, industry = lookup.get(sym)
-        print(f"{sym}: sector={sector}, industry={industry}")
+        print(f"{sym}: {lookup.get_profile(sym)}")

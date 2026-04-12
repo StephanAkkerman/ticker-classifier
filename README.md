@@ -22,6 +22,7 @@ It uses Yahoo Finance for equities, CoinGecko for cryptocurrencies and a few heu
 - [Usage](#usage)
 - [API](#api)
 - [Development](#development)
+- [Release and Versioning](#release-and-versioning)
 - [Citation](#citation)
 - [Contributing](#contributing)
 - [License](#license)
@@ -112,6 +113,23 @@ Run a quick smoke check by running the `classifier.py` module directly:
 ```
 
 If you add tests, run them with your chosen test runner (e.g. `pytest`).
+
+## Release and Versioning
+
+This package is published to PyPI through GitHub Actions:
+
+- Workflow: `.github/workflows/publish.yml`
+- Trigger: GitHub Release published
+- Publisher: `pypa/gh-action-pypi-publish` using trusted publishing (OIDC)
+
+Release flow:
+
+1. Update version in `pyproject.toml`.
+2. Update `ticker_classifier/__init__.py` `__version__` to match.
+3. Commit and push.
+4. Create a GitHub release with tag `vX.Y.Z` (or `X.Y.Z`).
+
+The publish workflow validates that the release tag version matches `pyproject.toml` before uploading to PyPI.
 
 ## Citation ✍️
 If you use this project in your research, please cite as follows (adjust

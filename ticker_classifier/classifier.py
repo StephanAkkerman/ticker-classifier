@@ -7,6 +7,7 @@ from .apis.coingecko import CoinGeckoClient
 from .apis.yahoo import YahooClient
 from .constants import MAJOR_FOREX, MINOR_FOREX, SHORTCUTS
 from .db.cache import TickerCache
+from .sectors import EquitySectorLookup
 
 
 class TickerClassifier:
@@ -23,6 +24,27 @@ class TickerClassifier:
         self.cache = TickerCache(db_name, hours_to_expire)
         self.yahoo = YahooClient()
         self.cg = CoinGeckoClient()
+        self.sectors = EquitySectorLookup()
+
+    def _hydrate_equity_metadata(self, symbol: str, item: Dict) -> Dict:
+        """Backfill sector/industry for cached equity-like rows when missing."""
+        category = str(item.get("category", "")).upper()
+        if category not in {"EQUITY", "ETF"}:
+            return item
+
+        if item.get("sector") and item.get("industry"):
+            return item
+
+        sector, industry = self.sectors.get(symbol)
+        if not sector and not industry:
+            return item
+
+        updated = dict(item)
+        if not updated.get("sector"):
+            updated["sector"] = sector
+        if not updated.get("industry"):
+            updated["industry"] = industry
+        return updated
 
     def _process_duel(
         self, to_process: List[str], yahoo_data: Dict, crypto_data: Dict
@@ -49,7 +71,8 @@ class TickerClassifier:
         dict
             Mapping of symbol -> final classification dict containing keys
             such as `category`, `ticker`, `name`, `market_cap`, and
-            `yahoo_lookup`.
+            `yahoo_lookup`, plus optional equity metadata (`sector`,
+            `industry`).
         """
         processed = {}
         # Init structure
@@ -84,6 +107,15 @@ class TickerClassifier:
                 qtype = info.get("quoteType", "UNKNOWN")
                 raw_mcap = info.get("marketCap", 0)
                 score = raw_mcap
+                sector = info.get("sector") or info.get("sectorDisp")
+                industry = info.get("industry") or info.get("industryDisp")
+
+                if qtype in ["EQUITY", "ETF"] and (not sector or not industry):
+                    db_sector, db_industry = self.sectors.get(sym)
+                    if not sector:
+                        sector = db_sector
+                    if not industry:
+                        industry = db_industry
 
                 # Boost logic
                 if qtype == "INDEX":
@@ -101,6 +133,8 @@ class TickerClassifier:
                     "type": qtype,
                     "name": info.get("shortName") or info.get("longName"),
                     "market_cap": raw_mcap,
+                    "sector": sector,
+                    "industry": industry,
                 }
 
             # 3. Crypto Data
@@ -149,6 +183,8 @@ class TickerClassifier:
                     "ticker": sym,
                     "name": details.get("name"),
                     "market_cap": details.get("market_cap"),
+                    "sector": details.get("sector"),
+                    "industry": details.get("industry"),
                     "yahoo_lookup": y_look,
                     "alternatives": alternatives,
                     "source": "api",
@@ -174,6 +210,7 @@ class TickerClassifier:
         unique = list({s.upper().strip() for s in symbols if s.strip()})
         results_map = {}
         to_process = []
+        cache_updates = {}
 
         # Cache check
         cached = self.cache.get_many(unique)
@@ -181,9 +218,15 @@ class TickerClassifier:
             if sym in SHORTCUTS:
                 results_map[sym] = {**SHORTCUTS[sym], "source": "shortcut"}
             elif sym in cached:
-                results_map[sym] = cached[sym]
+                hydrated = self._hydrate_equity_metadata(sym, cached[sym])
+                results_map[sym] = hydrated
+                if hydrated != cached[sym]:
+                    cache_updates[sym] = hydrated
             else:
                 to_process.append(sym)
+
+        if cache_updates:
+            self.cache.save_many(cache_updates)
 
         if to_process:
             y_res = self.yahoo.get_quotes_sync(to_process)
@@ -212,6 +255,7 @@ class TickerClassifier:
         unique = list({s.upper().strip() for s in symbols if s.strip()})
         results_map = {}
         to_process = []
+        cache_updates = {}
 
         # Cache Read (Run in thread to avoid blocking loop)
         loop = asyncio.get_running_loop()
@@ -221,9 +265,15 @@ class TickerClassifier:
             if sym in SHORTCUTS:
                 results_map[sym] = {**SHORTCUTS[sym], "source": "shortcut"}
             elif sym in cached:
-                results_map[sym] = cached[sym]
+                hydrated = self._hydrate_equity_metadata(sym, cached[sym])
+                results_map[sym] = hydrated
+                if hydrated != cached[sym]:
+                    cache_updates[sym] = hydrated
             else:
                 to_process.append(sym)
+
+        if cache_updates:
+            await loop.run_in_executor(None, self.cache.save_many, cache_updates)
 
         if to_process:
             async with aiohttp.ClientSession() as session:

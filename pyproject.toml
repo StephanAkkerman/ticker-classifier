@@ -1,15 +1,16 @@
 [project]
 name = "ticker_classifier"
-version = "0.1.0"
+version = "0.1.1"
 description = "A robust stock, crypto, and forex classifier with async support."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 authors = [
   { name = "Stephan Akkerman", email = "stephan@akkerman.ai" },
 ]
 dependencies = [
-    "requests",
-    "aiohttp"
+ "requests==2.33.1",
+  "aiohttp==3.13.5",
+  "financedatabase==2.3.1"
 ]
 
 [build-system]

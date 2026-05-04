@@ -134,6 +134,11 @@ class TickerClassifier:
             "source": source,
         }
 
+    @staticmethod
+    def _is_equity_like_quote(info: Dict) -> bool:
+        qtype = str(info.get("quoteType") or "").upper()
+        return qtype in {"EQUITY", "ETF", "INDEX", "FUTURE", "MUTUALFUND"}
+
     def _resolve_unknown_sync(self, symbol: str) -> Dict | None:
         best_score = float("-inf")
         best_symbol = ""
@@ -334,6 +339,8 @@ class TickerClassifier:
                     score = 50_000_000_000
                 if qtype == "FUTURE":
                     score = 10_000_000_000
+                if qtype == "ETF" and score < 100_000_000:
+                    score = 100_000_000
 
                 # If we found a valid stock object but mcap is missing/0,
                 # give it a base score so it beats tiny cryptos.
@@ -428,6 +435,7 @@ class TickerClassifier:
         results_map = {}
         to_process = []
         cache_updates = {}
+        cached_crypto = {}
 
         # Cache check
         cached = self.cache.get_many(unique)
@@ -443,12 +451,29 @@ class TickerClassifier:
                     to_process.append(sym)
                     continue
 
+                if str(cached_item.get("category") or "").upper() == "CRYPTO":
+                    cached_crypto[sym] = cached_item
+                    continue
+
                 hydrated = self._hydrate_equity_metadata(sym, cached_item)
                 results_map[sym] = hydrated
                 if hydrated != cached_item:
                     cache_updates[sym] = hydrated
             else:
                 to_process.append(sym)
+
+        if cached_crypto:
+            crypto_yahoo = self.yahoo.get_quotes_sync(list(cached_crypto))
+            for sym, cached_item in cached_crypto.items():
+                info = crypto_yahoo.get(sym)
+                if info and self._is_equity_like_quote(info):
+                    to_process.append(sym)
+                    continue
+
+                hydrated = self._hydrate_equity_metadata(sym, cached_item)
+                results_map[sym] = hydrated
+                if hydrated != cached_item:
+                    cache_updates[sym] = hydrated
 
         if cache_updates:
             self.cache.save_many(cache_updates)
@@ -492,6 +517,7 @@ class TickerClassifier:
         results_map = {}
         to_process = []
         cache_updates = {}
+        cached_crypto = {}
 
         # Cache Read (Run in thread to avoid blocking loop)
         loop = asyncio.get_running_loop()
@@ -509,12 +535,31 @@ class TickerClassifier:
                     to_process.append(sym)
                     continue
 
+                if str(cached_item.get("category") or "").upper() == "CRYPTO":
+                    cached_crypto[sym] = cached_item
+                    continue
+
                 hydrated = self._hydrate_equity_metadata(sym, cached_item)
                 results_map[sym] = hydrated
                 if hydrated != cached_item:
                     cache_updates[sym] = hydrated
             else:
                 to_process.append(sym)
+
+        if cached_crypto:
+            crypto_yahoo = await loop.run_in_executor(
+                None, self.yahoo.get_quotes_sync, list(cached_crypto)
+            )
+            for sym, cached_item in cached_crypto.items():
+                info = crypto_yahoo.get(sym)
+                if info and self._is_equity_like_quote(info):
+                    to_process.append(sym)
+                    continue
+
+                hydrated = self._hydrate_equity_metadata(sym, cached_item)
+                results_map[sym] = hydrated
+                if hydrated != cached_item:
+                    cache_updates[sym] = hydrated
 
         if cache_updates:
             await loop.run_in_executor(None, self.cache.save_many, cache_updates)

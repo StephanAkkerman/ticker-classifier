@@ -1,4 +1,4 @@
 requests
 aiohttp==3.13.5
-financedatabase==2.3.1
+financedatabase==2.4.0
 tradingview-scraper==0.4.20

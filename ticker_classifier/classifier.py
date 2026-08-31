@@ -10,6 +10,22 @@ from .constants import MAJOR_FOREX, MINOR_FOREX, SHORTCUTS
 from .db.cache import TickerCache
 from .sectors import EquitySectorLookup
 
+# Fundamentals are read straight off the Yahoo ``v7/finance/quote`` payload the
+# classifier already fetches, so surfacing them costs no extra network calls.
+# Each entry is ``(exposed_key, yahoo_key, must_be_positive)``. Ratios and
+# volumes are dropped when non-positive because Yahoo reports 0/negative for
+# "not applicable" (loss-making companies, ETFs, indices) and rendering those
+# is more misleading than omitting them.
+_YAHOO_FUNDAMENTAL_FIELDS = (
+    ("market_cap", "marketCap", True),
+    ("forward_pe", "forwardPE", True),
+    ("trailing_pe", "trailingPE", True),
+    ("eps_forward", "epsForward", False),
+    ("eps_trailing", "epsTrailingTwelveMonths", False),
+    ("avg_volume", "averageDailyVolume3Month", True),
+    ("avg_volume_10d", "averageDailyVolume10Day", True),
+)
+
 
 class TickerClassifier:
     def __init__(self, db_name: str = "ticker_cache.db", hours_to_expire: int = 24):
@@ -101,6 +117,64 @@ class TickerClassifier:
                 best = (score, quote)
         return best[1] if best else None
 
+    @staticmethod
+    def _coerce_number(value: object, *, must_be_positive: bool) -> float | None:
+        """Return ``value`` as a float, or ``None`` when it is unusable.
+
+        Parameters
+        ----------
+        value : object
+            Raw value straight from the Yahoo quote payload.
+        must_be_positive : bool
+            When True, non-positive numbers are treated as missing.
+
+        Returns
+        -------
+        float or None
+            The coerced number, or ``None`` when it is absent, non-numeric,
+            not finite, or fails the positivity requirement.
+        """
+        if isinstance(value, bool) or value is None:
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if number != number or number in (float("inf"), float("-inf")):
+            return None
+        if must_be_positive and number <= 0:
+            return None
+        return number
+
+    @classmethod
+    def _extract_fundamentals(cls, info: Dict) -> Dict | None:
+        """Pull the fundamentals block out of a Yahoo quote payload.
+
+        Parameters
+        ----------
+        info : dict
+            A single quote dict as returned by :class:`YahooClient`.
+
+        Returns
+        -------
+        dict or None
+            Mapping of fundamental name -> value, restricted to the fields
+            Yahoo actually reported. ``None`` when nothing usable was found.
+        """
+        fundamentals: Dict[str, object] = {}
+        for key, yahoo_key, must_be_positive in _YAHOO_FUNDAMENTAL_FIELDS:
+            number = cls._coerce_number(
+                info.get(yahoo_key), must_be_positive=must_be_positive
+            )
+            if number is not None:
+                fundamentals[key] = number
+
+        currency = str(info.get("currency") or "").strip().upper()
+        if fundamentals and currency:
+            fundamentals["currency"] = currency
+
+        return fundamentals or None
+
     def _build_from_yahoo_info(
         self, symbol: str, info: Dict, *, lookup_symbol: str, source: str
     ) -> Dict:
@@ -129,6 +203,7 @@ class TickerClassifier:
             "sector": sector,
             "industry": industry,
             "company_profile": company_profile or None,
+            "fundamentals": self._extract_fundamentals(info),
             "yahoo_lookup": lookup_symbol,
             "alternatives": [],
             "source": source,
@@ -284,7 +359,8 @@ class TickerClassifier:
             Mapping of symbol -> final classification dict containing keys
             such as `category`, `ticker`, `name`, `market_cap`, and
             `yahoo_lookup`, plus optional equity metadata (`sector`,
-            `industry`, `company_profile`).
+            `industry`, `company_profile`) and a `fundamentals` block
+            (`forward_pe`, `trailing_pe`, `avg_volume`, ...).
         """
         processed = {}
         # Init structure
@@ -355,6 +431,7 @@ class TickerClassifier:
                     "sector": sector,
                     "industry": industry,
                     "company_profile": company_profile or None,
+                    "fundamentals": self._extract_fundamentals(info),
                 }
 
             # 3. Crypto Data
@@ -367,6 +444,13 @@ class TickerClassifier:
                     "name": info.get("name"),
                     "symbol": str(info.get("symbol") or "").upper() or sym,
                     "market_cap": mcap,
+                    # CoinGecko only supplies a market cap; P/E and volume
+                    # averages have no crypto equivalent here.
+                    "fundamentals": (
+                        {"market_cap": float(mcap), "currency": "USD"}
+                        if isinstance(mcap, (int, float)) and mcap > 0
+                        else None
+                    ),
                 }
 
             # 4. Resolve
@@ -409,6 +493,7 @@ class TickerClassifier:
                     "sector": details.get("sector"),
                     "industry": details.get("industry"),
                     "company_profile": details.get("company_profile"),
+                    "fundamentals": details.get("fundamentals"),
                     "yahoo_lookup": y_look,
                     "alternatives": alternatives,
                     "source": "api",

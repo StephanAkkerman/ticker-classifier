@@ -32,6 +32,7 @@ It uses Yahoo Finance for equities, CoinGecko for cryptocurrencies and a few heu
 - Classify symbols as `Equity`, `Crypto`, `Forex`, `Commodity`, `Index` or `Unknown`.
 - Adds `sector` and `industry` metadata for many equity tickers (for example `AAPL`, `NVDA`).
 - Adds a compact `company_profile` payload for equity/ETF symbols (exchange, country, currency, industry group, website, market-cap category).
+- Adds a `fundamentals` block (market cap, forward/trailing P/E, forward & trailing EPS, 3-month and 10-day average volume, currency) read from the same Yahoo quote used for classification, so it costs no extra requests. Fields Yahoo does not report are omitted, and non-positive ratios/volumes are dropped rather than shown as `0`.
 - Uses multiple public APIs and simple heuristics to make robust decisions.
 - Uses a generic Yahoo search fallback for unknown symbols so index names/aliases (for example `NASDAQ`, `FTSE`, `HANGSENG`) can be resolved without manual per-ticker shortcuts.
 - Uses exact CoinGecko coin-name matching to resolve name-style crypto queries (for example `BITCOIN`) and returns canonical symbols (`BTC`) instead of unrelated meme/derivative coins.
@@ -79,7 +80,7 @@ asyncio.run(main())
 The output for each symbol is a dictionary like:
 
 ```python
-{'category': 'EQUITY', 'ticker': 'AAPL', 'name': 'Apple Inc.', 'market_cap': 4029017227264, 'sector': 'Information Technology', 'industry': 'Electronic Equipment, Instruments & Components', 'company_profile': {'industry_group': 'Technology Hardware & Equipment', 'country': 'United States', 'exchange': 'NASDAQ Global Select', 'currency': 'USD', 'website': 'http://www.apple.com', 'market_cap_category': 'Mega Cap'}, 'yahoo_lookup': 'AAPL', 'alternatives': ['crypto'], 'source': 'api'}
+{'category': 'EQUITY', 'ticker': 'AAPL', 'name': 'Apple Inc.', 'market_cap': 4029017227264, 'sector': 'Information Technology', 'industry': 'Electronic Equipment, Instruments & Components', 'company_profile': {'industry_group': 'Technology Hardware & Equipment', 'country': 'United States', 'exchange': 'NASDAQ Global Select', 'currency': 'USD', 'website': 'http://www.apple.com', 'market_cap_category': 'Mega Cap'}, 'fundamentals': {'market_cap': 4029017227264.0, 'forward_pe': 30.72, 'trailing_pe': 41.09, 'eps_forward': 8.84, 'eps_trailing': 6.61, 'avg_volume': 54321000.0, 'avg_volume_10d': 48765000.0, 'currency': 'USD'}, 'yahoo_lookup': 'AAPL', 'alternatives': ['crypto'], 'source': 'api'}
 {'category': 'crypto', 'ticker': 'BTC', 'name': 'Bitcoin', 'market_cap': 1736590593460.9607, 'yahoo_lookup': 'BTC-USD', 'alternatives': ['stock'], 'source': 'api'}
 {'category': 'crypto', 'ticker': 'ETH', 'name': 'Ethereum', 'market_cap': 338145915081.1455, 'yahoo_lookup': 'ETH-USD', 'alternatives': ['stock'], 'source': 'cache'}
 {'category': 'forex', 'ticker': 'JPY', 'name': 'JPY Currency', 'market_cap': None, 'yahoo_lookup': 'JPYUSD=X', 'alternatives': ['stock'], 'source': 'cache'}

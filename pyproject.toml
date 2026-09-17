@@ -1,6 +1,6 @@
 [project]
 name = "ticker_classifier"
-version = "0.1.4"
+dynamic = ["version"]
 description = "A robust stock, crypto, and forex classifier with async support."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,6 +17,11 @@ dependencies = [
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+# Single source of truth for the version: the package's `_version.py`.
+# A release bumps that one literal; this reads it, so the two cannot drift.
+[tool.setuptools.dynamic]
+version = { attr = "ticker_classifier._version.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["ticker_classifier*"]

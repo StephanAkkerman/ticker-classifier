@@ -101,6 +101,53 @@ class TickerClassifier:
                 best = (score, quote)
         return best[1] if best else None
 
+    @staticmethod
+    def _extract_fundamentals(info: Dict) -> Dict | None:
+        """Slow-moving valuation/volume metrics already present on a Yahoo quote.
+
+        Reads fields off the same quote response the classifier fetches to
+        determine category/sector/market cap, so this adds no extra network
+        calls. Only fields the quote actually reported are included -- a
+        missing field means unknown, never zero -- and non-positive
+        ratios/prices/volumes are dropped rather than kept as `0`.
+
+        Parameters
+        ----------
+        info : dict
+            Raw Yahoo quote dict (as returned by `YahooClient`).
+
+        Returns
+        -------
+        dict or None
+            `market_cap`, `forward_pe`, `trailing_pe`, `eps_forward`,
+            `eps_trailing`, `nav` (net asset value per share -- funds/ETFs
+            only), `avg_volume` (3-month daily average), `avg_volume_10d`,
+            and `currency`. `None` when nothing usable was reported.
+        """
+        raw_fields = {
+            "market_cap": info.get("marketCap"),
+            "forward_pe": info.get("forwardPE"),
+            "trailing_pe": info.get("trailingPE"),
+            "eps_forward": info.get("epsForward"),
+            "eps_trailing": info.get("epsTrailingTwelveMonths"),
+            "nav": info.get("navPrice"),
+            "avg_volume": info.get("averageDailyVolume3Month"),
+            "avg_volume_10d": info.get("averageDailyVolume10Day"),
+        }
+        fundamentals = {
+            k: v
+            for k, v in raw_fields.items()
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0
+        }
+        if not fundamentals:
+            return None
+
+        currency = info.get("currency")
+        if isinstance(currency, str) and currency.strip():
+            fundamentals["currency"] = currency.strip().upper()
+
+        return fundamentals
+
     def _build_from_yahoo_info(
         self, symbol: str, info: Dict, *, lookup_symbol: str, source: str
     ) -> Dict:
@@ -108,8 +155,10 @@ class TickerClassifier:
         market_cap = info.get("marketCap", 0)
 
         company_profile = {}
+        fundamentals = None
         if qtype in ["EQUITY", "ETF"]:
             company_profile = self.sectors.get_profile(lookup_symbol)
+            fundamentals = self._extract_fundamentals(info)
 
         sector = info.get("sector") or info.get("sectorDisp")
         industry = info.get("industry") or info.get("industryDisp")
@@ -129,6 +178,7 @@ class TickerClassifier:
             "sector": sector,
             "industry": industry,
             "company_profile": company_profile or None,
+            "fundamentals": fundamentals,
             "yahoo_lookup": lookup_symbol,
             "alternatives": [],
             "source": source,
@@ -320,8 +370,10 @@ class TickerClassifier:
                 raw_mcap = info.get("marketCap", 0)
                 score = raw_mcap
                 company_profile = {}
+                fundamentals = None
                 if qtype in ["EQUITY", "ETF"]:
                     company_profile = self.sectors.get_profile(sym)
+                    fundamentals = self._extract_fundamentals(info)
 
                 sector = info.get("sector") or info.get("sectorDisp")
                 industry = info.get("industry") or info.get("industryDisp")
@@ -355,6 +407,7 @@ class TickerClassifier:
                     "sector": sector,
                     "industry": industry,
                     "company_profile": company_profile or None,
+                    "fundamentals": fundamentals,
                 }
 
             # 3. Crypto Data
@@ -409,6 +462,7 @@ class TickerClassifier:
                     "sector": details.get("sector"),
                     "industry": details.get("industry"),
                     "company_profile": details.get("company_profile"),
+                    "fundamentals": details.get("fundamentals"),
                     "yahoo_lookup": y_look,
                     "alternatives": alternatives,
                     "source": "api",

@@ -27,6 +27,10 @@ class CoinGeckoClient:
         self._crypto_map = None  # { 'BTC': ['bitcoin', 'bitcoin-token'], ... }
         self._name_map = None  # { 'BITCOIN': ['bitcoin'], ... }
         self._id_meta = None  # { 'bitcoin': {'symbol': 'BTC', 'name': 'Bitcoin'}, ... }
+        # True when the most recent price lookup hit an error (rate limit,
+        # timeout, ...). Absent crypto data then means "unknown", not "not
+        # crypto", so callers must not cache a classification built from it.
+        self.lookup_failed = False
 
     @staticmethod
     def _normalize_name(value: str) -> str:
@@ -74,6 +78,7 @@ class CoinGeckoClient:
                     "name": name,
                 }
         except Exception:
+            self.lookup_failed = True
             self._crypto_map = {}
             self._name_map = {}
             self._id_meta = {}
@@ -119,6 +124,7 @@ class CoinGeckoClient:
                         "name": name,
                     }
         except Exception:
+            self.lookup_failed = True
             self._crypto_map = {}
             self._name_map = {}
             self._id_meta = {}
@@ -265,6 +271,7 @@ class CoinGeckoClient:
             Mapping of symbol -> {"market_cap": ..., "name": ..., "id": ...}
             for matches found. Returns an empty dict if nothing matched.
         """
+        self.lookup_failed = False
         self._load_map_sync()
         results = {}
         ids, id_map = self._get_candidate_ids(symbols)
@@ -288,7 +295,7 @@ class CoinGeckoClient:
                 data = resp.json()
                 self._process_response(data, id_map, results)
             except Exception:
-                pass
+                self.lookup_failed = True
 
         self._fill_missing_with_tradingview(symbols, results)
         return results
@@ -315,6 +322,7 @@ class CoinGeckoClient:
         Uses the async map loader `_load_map_async` and requests CoinGecko in
         chunks. Failures for a chunk are swallowed and processing continues.
         """
+        self.lookup_failed = False
         await self._load_map_async(session)
         results = {}
         ids, id_map = self._get_candidate_ids(symbols)
@@ -335,7 +343,7 @@ class CoinGeckoClient:
                     data = await resp.json()
                     self._process_response(data, id_map, results)
             except Exception:
-                pass
+                self.lookup_failed = True
 
         await self._fill_missing_with_tradingview_async(symbols, results)
         return results

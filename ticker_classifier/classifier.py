@@ -547,7 +547,11 @@ class TickerClassifier:
                 if resolved:
                     processed[sym] = resolved
 
-            self.cache.save_many(processed)
+            # A failed CoinGecko lookup makes every crypto score 0, so tickers
+            # shared with a stock/ETF (BTC, NEAR, ...) would be cached as the
+            # stock for the full TTL. Return the best effort, but remember none.
+            if not self.cg.lookup_failed:
+                self.cache.save_many(processed)
             results_map.update(processed)
 
         return [results_map.get(s.upper().strip()) for s in symbols]
@@ -635,8 +639,10 @@ class TickerClassifier:
                     if resolved:
                         processed[sym] = resolved
 
-            # Cache Write (Run in thread)
-            await loop.run_in_executor(None, self.cache.save_many, processed)
+            # Cache Write (Run in thread). Skipped when CoinGecko failed: see
+            # classify() for why a partial duel must not be remembered.
+            if not self.cg.lookup_failed:
+                await loop.run_in_executor(None, self.cache.save_many, processed)
             results_map.update(processed)
 
         return [results_map.get(s.upper().strip()) for s in symbols]
